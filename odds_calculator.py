@@ -29,7 +29,6 @@ class HandEvaluator:
     def evaluate_hand(cls, cards: List[str]) -> Tuple[int, List[int]]:
         """评估最佳5张牌组合，返回 (等级, 踢脚牌)"""
         if len(cards) < 5:
-            # 不足5张牌时，直接评估已有的牌
             return cls._evaluate_partial(cards)
 
         best_score = (0, [0])
@@ -57,7 +56,6 @@ class HandEvaluator:
         )
         kickers = [r for r, c in sorted_ranks_by_count]
 
-        # 检查是否所有花色相同（同花趋势）
         all_same_suit = len(set(suits)) == 1
 
         if counts[0] == 4:
@@ -84,7 +82,6 @@ class HandEvaluator:
 
         is_flush = max(suit_counts.values()) == 5
 
-        # 检查顺子
         is_straight = False
         straight_high = 0
         unique_ranks = sorted(set(ranks), reverse=True)
@@ -94,7 +91,6 @@ class HandEvaluator:
                 is_straight = True
                 straight_high = unique_ranks[0]
 
-            # A-2-3-4-5 小顺子
             if not is_straight and set(unique_ranks) == {14, 2, 3, 4, 5}:
                 is_straight = True
                 straight_high = 5
@@ -105,43 +101,33 @@ class HandEvaluator:
         )
         kickers = [r for r, c in sorted_ranks_by_count]
 
-        # 皇家同花顺
         if is_flush and is_straight and straight_high == 14:
             return (9, [14])
 
-        # 同花顺
         if is_flush and is_straight:
             return (8, [straight_high])
 
-        # 四条
         if counts == [4, 1]:
             return (7, kickers)
 
-        # 葫芦
         if counts == [3, 2]:
             return (6, kickers)
 
-        # 同花
         if is_flush:
             return (5, sorted(ranks, reverse=True))
 
-        # 顺子
         if is_straight:
             return (4, [straight_high])
 
-        # 三条
         if counts == [3, 1, 1]:
             return (3, kickers)
 
-        # 两对
         if counts == [2, 2, 1]:
             return (2, kickers)
 
-        # 一对
         if counts == [2, 1, 1, 1]:
             return (1, kickers)
 
-        # 高牌
         return (0, sorted(ranks, reverse=True))
 
     @classmethod
@@ -202,21 +188,17 @@ class OddsCalculator:
             random.shuffle(remaining_deck)
             idx = 0
 
-            # 补齐公共牌
             sim_community = community_cards + remaining_deck[idx : idx + cards_to_deal]
             idx += cards_to_deal
 
-            # 发对手牌
             opponent_hands = []
             for _ in range(num_opponents):
                 opponent_hands.append(remaining_deck[idx : idx + 2])
                 idx += 2
 
-            # 评估我的手牌（手牌 + 公共牌 = 7张取最佳5张）
             my_full = my_cards + sim_community
             my_score = self.evaluator.evaluate_hand(my_full)
 
-            # 评估对手最佳手牌
             best_opponent_score = (0, [0])
             for opp_hand in opponent_hands:
                 opp_full = opp_hand + sim_community
@@ -236,7 +218,6 @@ class OddsCalculator:
         tie_rate = ties / total
         lose_rate = losses / total
 
-        # 当前牌型
         if community_cards:
             current_hand = my_cards + community_cards
             current_score = self.evaluator.evaluate_hand(current_hand)
@@ -244,7 +225,6 @@ class OddsCalculator:
         else:
             hand_name = "待翻牌"
 
-        # 计算 Outs
         outs = self._calculate_outs(my_cards, community_cards, remaining_deck)
 
         result = {
@@ -260,29 +240,62 @@ class OddsCalculator:
         result["suggestion"] = self._get_suggestion(result)
         return result
 
-    def _calculate_outs(
-        self,
-        my_cards: List[str],
-        community_cards: List[str],
-        remaining: List[str],
-    ) -> int:
-        """计算补牌数 - 只计算能提升牌型等级的牌"""
-        if not community_cards or len(community_cards) >= 5:
+    def _calculate_outs(self, my_cards, community, remaining):
+        """
+        传统德州扑克补牌数计算
+        
+        计算逻辑：
+        1. 强补牌：能让牌力提升到两对(level 2)或以上的牌
+           - 包括：同花听牌、顺子听牌、三条、葫芦等
+        2. 高牌补牌（Overcards）：当没有强补牌且当前是高牌时，
+           计算能配对手牌中高于公共牌的牌
+           - 例：AK 在 952 面上，3张A + 3张K = 6 outs
+        """
+        if not community:
             return 0
 
-        current_full = my_cards + community_cards
-        current_score = self.evaluator.evaluate_hand(current_full)
-        current_level = current_score[0]  # 只看牌型等级
+        known_cards = my_cards + community
+        current_score = self.evaluator.evaluate_hand(known_cards)
+        current_level = current_score[0]
 
-        outs = 0
+        # 皇家同花顺，无法提升
+        if current_level >= 9:
+            return 0
+
+        # === 第一阶段：计算强补牌 (提升到两对或以上) ===
+        min_target = max(2, current_level + 1)
+        strong_outs = 0
+
         for card in remaining:
-            test_hand = my_cards + community_cards + [card]
+            test_hand = known_cards + [card]
             new_score = self.evaluator.evaluate_hand(test_hand)
-            # 只有牌型等级提升才算 out
-            if new_score[0] > current_level:
-                outs += 1
+            if new_score[0] >= min_target and new_score[0] > current_level:
+                strong_outs += 1
 
-        return outs
+        if strong_outs > 0:
+            return strong_outs
+
+        # === 第二阶段：没有强补牌时，计算高牌补牌 (Overcards) ===
+        if current_level == 0:
+            # 找到公共牌中最大的牌值
+            rank_values = {
+                '2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7,
+                '8': 8, '9': 9, 'T': 10, 'J': 11, 'Q': 12, 'K': 13, 'A': 14
+            }
+            comm_max = max(rank_values.get(c[0], 0) for c in community)
+
+            # 找出手牌中高于所有公共牌的牌面值（Overcards）
+            overcard_ranks = set()
+            for c in my_cards:
+                if rank_values.get(c[0], 0) > comm_max:
+                    overcard_ranks.add(c[0])
+
+            # 计算剩余牌中能配对这些 overcard 的数量
+            if overcard_ranks:
+                overcard_outs = sum(1 for card in remaining if card[0] in overcard_ranks)
+                return overcard_outs
+
+        return 0
 
     def _outs_to_probability(self, outs: int, community_cards: List[str]) -> float:
         """Outs转概率 - 使用精确计算"""
@@ -293,12 +306,10 @@ class OddsCalculator:
         cards_to_come = 5 - len(community_cards)
 
         if cards_to_come == 2:
-            # Turn + River: 1 - (miss_turn * miss_river)
             miss_turn = (remaining_cards - outs) / remaining_cards
             miss_river = (remaining_cards - 1 - outs) / (remaining_cards - 1)
             prob = 1 - (miss_turn * miss_river)
         elif cards_to_come == 1:
-            # River only
             prob = outs / remaining_cards
         else:
             prob = 0.0
