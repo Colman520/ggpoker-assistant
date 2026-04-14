@@ -1,0 +1,48 @@
+{
+  "window_title_keyword": "GGPoker",
+  "capture_interval": 0.8,
+  "simulation_count": 20000,
+  "default_opponents": 5,
+  "regions": {
+    "my_cards": [
+      0.42,
+      0.72,
+      0.16,
+      0.12
+    ],
+    "community_cards": [
+      0.25,
+      0.38,
+      0.5,
+      0.1
+    ],
+    "pot": [
+      0.42,
+      0.3,
+      0.16,
+      0.05
+    ],
+    "bet_amount": [
+      0.42,
+      0.85,
+      0.16,
+      0.04
+    ]
+  },
+  "recognition": {
+    "match_threshold": 0.8,
+    "card_aspect_ratio": 0.7,
+    "suit_min_pixel_ratio": 0.015,
+    "spade_brightness_threshold": 70
+  },
+  "gui": {
+    "opacity": 0.88,
+    "always_on_top": true,
+    "position": [
+      726,
+      232
+    ],
+    "width": 320,
+    "height": 520
+  }
+}

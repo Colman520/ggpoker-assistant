@@ -1,7 +1,7 @@
 import os
 import cv2
 import numpy as np
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Dict
 
 from config import Config
 
@@ -9,14 +9,39 @@ RANKS = ["2", "3", "4", "5", "6", "7", "8", "9", "T", "J", "Q", "K", "A"]
 SUITS = ["s", "h", "d", "c"]
 SUIT_NAMES = {"s": "♠", "h": "♥", "d": "♦", "c": "♣"}
 
+# GGPoker 花色颜色范围 (HSV) — 可通过校准工具调整
+GGPOKER_SUIT_COLORS = {
+    "h": {  # 红心 - 红色
+        "ranges": [
+            (np.array([0, 80, 80]), np.array([12, 255, 255])),
+            (np.array([158, 80, 80]), np.array([180, 255, 255])),
+        ]
+    },
+    "d": {  # 方块 - 蓝色
+        "ranges": [
+            (np.array([95, 60, 60]), np.array([135, 255, 255])),
+        ]
+    },
+    "c": {  # 梅花 - 绿色
+        "ranges": [
+            (np.array([30, 50, 50]), np.array([90, 255, 255])),
+        ]
+    },
+    "s": {  # 黑桃 - 黑色/深灰 (特殊处理)
+        "ranges": []  # 通过亮度检测
+    },
+}
+
 
 class CardRecognizer:
-    """GGPoker 牌面识别器"""
+    """GGPoker 牌面识别器 - 增强版"""
 
     def __init__(self, config: Config):
         self.config = config
-        self.templates = {}
+        self.rank_templates: Dict[str, np.ndarray] = {}
+        self.suit_templates: Dict[str, np.ndarray] = {}
         self.template_dir = "templates"
+        self.debug_mode = False
         self._load_templates()
 
     def _load_templates(self):
@@ -24,221 +49,269 @@ class CardRecognizer:
         rank_dir = os.path.join(self.template_dir, "ranks")
         suit_dir = os.path.join(self.template_dir, "suits")
 
-        if os.path.exists(rank_dir):
-            for rank in RANKS:
-                path = os.path.join(rank_dir, f"{rank}.png")
-                if os.path.exists(path):
-                    template = cv2.imread(path, cv2.IMREAD_GRAYSCALE)
-                    if template is not None:
-                        self.templates[f"rank_{rank}"] = template
+        for rank in RANKS:
+            path = os.path.join(rank_dir, f"{rank}.png")
+            if os.path.exists(path):
+                tpl = cv2.imread(path, cv2.IMREAD_GRAYSCALE)
+                if tpl is not None:
+                    self.rank_templates[rank] = tpl
 
-        if os.path.exists(suit_dir):
-            for suit in SUITS:
-                path = os.path.join(suit_dir, f"{suit}.png")
-                if os.path.exists(path):
-                    template = cv2.imread(path, cv2.IMREAD_GRAYSCALE)
-                    if template is not None:
-                        self.templates[f"suit_{suit}"] = template
+        for suit in SUITS:
+            path = os.path.join(suit_dir, f"{suit}.png")
+            if os.path.exists(path):
+                tpl = cv2.imread(path, cv2.IMREAD_GRAYSCALE)
+                if tpl is not None:
+                    self.suit_templates[suit] = tpl
 
-        if self.templates:
-            print(f"✅ 加载了 {len(self.templates)} 个模板")
+        n = len(self.rank_templates) + len(self.suit_templates)
+        if n > 0:
+            print(f"✅ 模板: {len(self.rank_templates)}个点数 + {len(self.suit_templates)}个花色")
         else:
-            print("⚠️ 未找到模板文件，将使用颜色+轮廓识别方法")
+            print("⚠️ 无模板文件，使用颜色+轮廓识别（准确率有限）")
 
     def recognize_cards(self, img: np.ndarray, max_cards: int = 5) -> List[str]:
         """识别图像中的扑克牌"""
         if img is None or img.size == 0:
             return []
 
-        if self.templates:
-            return self._recognize_by_template(img, max_cards)
-        else:
-            return self._recognize_by_color_contour(img, max_cards)
-
-    def _recognize_by_template(self, img: np.ndarray, max_cards: int) -> List[str]:
-        """模板匹配法识别"""
-        cards = []
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        # Step 1: 找到牌的区域
         card_regions = self._find_card_regions(img, max_cards)
 
-        for region in card_regions:
-            x, y, w, h = region
-            card_img = gray[y : y + h, x : x + w]
+        if not card_regions:
+            return []
 
-            rank_area = card_img[2 : int(h * 0.35), 2 : int(w * 0.45)]
-            suit_area = card_img[int(h * 0.25) : int(h * 0.55), 2 : int(w * 0.45)]
+        cards = []
+        for i, (x, y, w, h) in enumerate(card_regions):
+            card_img = img[y:y+h, x:x+w]
 
-            rank = self._match_rank(rank_area)
-            suit = self._match_suit(suit_area, img[y : y + h, x : x + w])
+            # Step 2: 识别花色 (颜色优先，最可靠)
+            suit = self._detect_suit(card_img)
+
+            # Step 3: 识别点数 (模板匹配)
+            rank = self._detect_rank(card_img)
 
             if rank and suit:
                 cards.append(f"{rank}{suit}")
-
-        return cards
-
-    def _recognize_by_color_contour(self, img: np.ndarray, max_cards: int) -> List[str]:
-        """基于颜色和轮廓的识别方法（备用）"""
-        cards = []
-        card_regions = self._find_card_regions(img, max_cards)
-
-        for region in card_regions:
-            x, y, w, h = region
-            card_img = img[y : y + h, x : x + w]
-            suit = self._detect_suit_by_color(card_img)
-            rank = None  # 需要模板或OCR
-
-            if suit:
+            elif suit and not rank:
+                # 花色识别到但点数没有 → 标记为未知
                 cards.append(f"?{suit}")
 
+            if self.debug_mode:
+                self._save_debug_card(card_img, i, rank, suit)
+
         return cards
 
-    def _find_card_regions(
-        self, img: np.ndarray, max_cards: int
-    ) -> List[Tuple[int, int, int, int]]:
-        """在图像中找到牌的位置"""
+    def _find_card_regions(self, img: np.ndarray, max_cards: int) -> List[Tuple[int, int, int, int]]:
+        """多策略找牌区域"""
+        h, w = img.shape[:2]
+
+        # 策略1: 自适应阈值 + 轮廓检测
+        regions = self._find_by_adaptive_threshold(img, max_cards)
+
+        # 策略2: 如果策略1失败，用边缘检测
+        if not regions:
+            regions = self._find_by_edges(img, max_cards)
+
+        # 策略3: 如果都失败，等分区域
+        if not regions:
+            regions = self._find_by_equal_split(img, max_cards)
+
+        return regions
+
+    def _find_by_adaptive_threshold(self, img: np.ndarray, max_cards: int) -> List[Tuple[int, int, int, int]]:
+        """自适应阈值找牌"""
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        height, width = gray.shape
+        h, w = gray.shape
 
-        _, thresh = cv2.threshold(gray, 180, 255, cv2.THRESH_BINARY)
+        # 尝试多个阈值
+        for thresh_val in [180, 160, 200, 140]:
+            _, binary = cv2.threshold(gray, thresh_val, 255, cv2.THRESH_BINARY)
 
-        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
-        thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
+            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
+            binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
+            binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel)
 
-        contours, _ = cv2.findContours(
-            thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
-        )
+            contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
+            regions = []
+            min_area = (w * h) / (max_cards * 10)
+            max_area = (w * h) / max(max_cards * 0.5, 1)
+
+            for contour in contours:
+                x, y, cw, ch = cv2.boundingRect(contour)
+                area = cw * ch
+                aspect = cw / ch if ch > 0 else 0
+
+                if min_area < area < max_area and 0.45 < aspect < 1.0:
+                    regions.append((x, y, cw, ch))
+
+            if regions:
+                regions.sort(key=lambda r: r[0])
+                return regions[:max_cards]
+
+        return []
+
+    def _find_by_edges(self, img: np.ndarray, max_cards: int) -> List[Tuple[int, int, int, int]]:
+        """边缘检测找牌"""
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+        edges = cv2.Canny(blurred, 30, 100)
+
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (7, 7))
+        closed = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, kernel)
+
+        contours, _ = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        h, w = gray.shape
         regions = []
-        min_card_area = (width * height) / (max_cards * 8)
+        min_area = (w * h) / (max_cards * 12)
 
         for contour in contours:
-            x, y, w, h = cv2.boundingRect(contour)
-            area = w * h
-            aspect_ratio = w / h if h > 0 else 0
+            x, y, cw, ch = cv2.boundingRect(contour)
+            area = cw * ch
+            aspect = cw / ch if ch > 0 else 0
 
-            if area > min_card_area and 0.5 < aspect_ratio < 0.9:
-                regions.append((x, y, w, h))
+            if area > min_area and 0.4 < aspect < 1.1:
+                regions.append((x, y, cw, ch))
 
         regions.sort(key=lambda r: r[0])
         return regions[:max_cards]
 
-    def _match_rank(self, rank_area: np.ndarray) -> Optional[str]:
-        """模板匹配点数"""
-        if rank_area is None or rank_area.size == 0:
-            return None
+    def _find_by_equal_split(self, img: np.ndarray, max_cards: int) -> List[Tuple[int, int, int, int]]:
+        """等分法 — 最后的备选"""
+        h, w = img.shape[:2]
+        if max_cards <= 0:
+            return []
 
-        best_match = None
-        best_score = 0
-        threshold = self.config["recognition"]["match_threshold"]
+        card_w = w // max_cards
+        margin_x = int(card_w * 0.05)
+        margin_y = int(h * 0.05)
 
-        for rank in RANKS:
-            key = f"rank_{rank}"
-            if key not in self.templates:
-                continue
+        regions = []
+        for i in range(max_cards):
+            x = i * card_w + margin_x
+            cw = card_w - 2 * margin_x
+            if cw > 10 and h - 2 * margin_y > 10:
+                regions.append((x, margin_y, cw, h - 2 * margin_y))
 
-            template = self.templates[key]
+        return regions
 
-            try:
-                if (
-                    rank_area.shape[0] < template.shape[0]
-                    or rank_area.shape[1] < template.shape[1]
-                ):
-                    template = cv2.resize(
-                        template, (rank_area.shape[1], rank_area.shape[0])
-                    )
-
-                result = cv2.matchTemplate(
-                    rank_area, template, cv2.TM_CCOEFF_NORMED
-                )
-                _, max_val, _, _ = cv2.minMaxLoc(result)
-
-                if max_val > best_score and max_val > threshold:
-                    best_score = max_val
-                    best_match = rank
-            except cv2.error:
-                continue
-
-        return best_match
-
-    def _match_suit(
-        self, suit_area: np.ndarray, card_color_img: np.ndarray
-    ) -> Optional[str]:
-        """匹配花色"""
-        suit_by_color = self._detect_suit_by_color(card_color_img)
-        if suit_by_color:
-            return suit_by_color
-
-        if suit_area is None or suit_area.size == 0:
-            return None
-
-        best_match = None
-        best_score = 0
-        threshold = self.config["recognition"]["match_threshold"]
-
-        for suit in SUITS:
-            key = f"suit_{suit}"
-            if key not in self.templates:
-                continue
-
-            template = self.templates[key]
-
-            try:
-                if (
-                    suit_area.shape[0] < template.shape[0]
-                    or suit_area.shape[1] < template.shape[1]
-                ):
-                    template = cv2.resize(
-                        suit_area, (suit_area.shape[1], suit_area.shape[0])
-                    )
-
-                result = cv2.matchTemplate(
-                    suit_area, template, cv2.TM_CCOEFF_NORMED
-                )
-                _, max_val, _, _ = cv2.minMaxLoc(result)
-
-                if max_val > best_score and max_val > threshold:
-                    best_score = max_val
-                    best_match = suit
-            except cv2.error:
-                continue
-
-        return best_match
-
-    def _detect_suit_by_color(self, card_img: np.ndarray) -> Optional[str]:
-        """通过颜色检测花色 (GGPoker: 黑/红/蓝/绿)"""
+    def _detect_suit(self, card_img: np.ndarray) -> Optional[str]:
+        """通过颜色检测花色 — 增强版"""
         if card_img is None or card_img.size == 0:
             return None
 
         hsv = cv2.cvtColor(card_img, cv2.COLOR_BGR2HSV)
-
-        color_scores = {}
-
-        # 红色（红心 ♥）
-        mask1 = cv2.inRange(hsv, np.array([0, 100, 100]), np.array([10, 255, 255]))
-        mask2 = cv2.inRange(hsv, np.array([160, 100, 100]), np.array([180, 255, 255]))
-        color_scores["h"] = cv2.countNonZero(mask1 + mask2)
-
-        # 蓝色（方块 ♦）
-        mask = cv2.inRange(hsv, np.array([100, 80, 80]), np.array([130, 255, 255]))
-        color_scores["d"] = cv2.countNonZero(mask)
-
-        # 绿色（梅花 ♣）
-        mask = cv2.inRange(hsv, np.array([35, 80, 80]), np.array([85, 255, 255]))
-        color_scores["c"] = cv2.countNonZero(mask)
-
         total_pixels = card_img.shape[0] * card_img.shape[1]
-        max_color_score = max(color_scores.values()) if color_scores else 0
-        min_color_threshold = total_pixels * 0.02
+        min_pixels = total_pixels * self.config["recognition"]["suit_min_pixel_ratio"]
 
-        if max_color_score < min_color_threshold:
-            gray = cv2.cvtColor(card_img, cv2.COLOR_BGR2GRAY)
-            dark_mask = cv2.inRange(gray, 0, 80)
-            dark_pixels = cv2.countNonZero(dark_mask)
-            if dark_pixels > min_color_threshold:
-                return "s"
+        scores = {}
+        for suit_key in ("h", "d", "c"):
+            scores[suit_key] = self._count_color_pixels(
+                hsv, GGPOKER_SUIT_COLORS[suit_key]["ranges"]
+            )
+
+        max_score = max(scores.values()) if scores else 0
+
+        if max_score >= min_pixels:
+            return max(scores, key=scores.get)
+
+        # 黑桃 — 检测深色像素
+        gray = cv2.cvtColor(card_img, cv2.COLOR_BGR2GRAY)
+        dark_mask = cv2.inRange(gray, 0, self.config["recognition"]["spade_brightness_threshold"])
+        dark_pixels = cv2.countNonZero(dark_mask)
+
+        if dark_pixels >= min_pixels:
+            return "s"
+
+        return None
+
+    @staticmethod
+    def _count_color_pixels(hsv: np.ndarray, color_ranges) -> int:
+        """统计 HSV 图像中匹配指定颜色范围的像素数"""
+        mask = np.zeros(hsv.shape[:2], dtype=np.uint8)
+        for low, high in color_ranges:
+            mask |= cv2.inRange(hsv, low, high)
+        return cv2.countNonZero(mask)
+
+    def _detect_rank(self, card_img: np.ndarray) -> Optional[str]:
+        """识别点数"""
+        if not self.rank_templates:
+            return self._detect_rank_by_contour(card_img)
+
+        h, w = card_img.shape[:2]
+        gray = cv2.cvtColor(card_img, cv2.COLOR_BGR2GRAY)
+
+        # 提取左上角区域 (点数位置)
+        rank_region = gray[2:int(h * 0.40), 2:int(w * 0.50)]
+        if rank_region.size == 0:
             return None
 
-        return max(color_scores, key=color_scores.get)
+        # 二值化增强对比
+        _, rank_binary = cv2.threshold(rank_region, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+
+        best_rank = None
+        best_score = 0
+        threshold = self.config["recognition"]["match_threshold"]
+
+        for rank, template in self.rank_templates.items():
+            score = self._multi_scale_match(rank_binary, template)
+            if score > best_score and score > threshold:
+                best_score = score
+                best_rank = rank
+
+        return best_rank
+
+    def _multi_scale_match(self, target: np.ndarray, template: np.ndarray) -> float:
+        """多尺度模板匹配"""
+        if target.size == 0 or template.size == 0:
+            return 0.0
+
+        best_score = 0.0
+        th, tw = template.shape[:2]
+        tgt_h, tgt_w = target.shape[:2]
+
+        # 计算合理的缩放范围
+        scale_w = tgt_w / tw if tw > 0 else 1
+        scale_h = tgt_h / th if th > 0 else 1
+        center_scale = min(scale_w, scale_h) * 0.8
+
+        scales = [center_scale * s for s in [0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2]]
+
+        for scale in scales:
+            if scale <= 0:
+                continue
+
+            new_w = max(3, int(tw * scale))
+            new_h = max(3, int(th * scale))
+
+            if new_w > tgt_w or new_h > tgt_h:
+                continue
+
+            resized = cv2.resize(template, (new_w, new_h))
+            try:
+                result = cv2.matchTemplate(target, resized, cv2.TM_CCOEFF_NORMED)
+                _, max_val, _, _ = cv2.minMaxLoc(result)
+                best_score = max(best_score, max_val)
+            except cv2.error:
+                continue
+
+        return best_score
+
+    def _detect_rank_by_contour(self, card_img: np.ndarray) -> Optional[str]:
+        """无模板时通过轮廓特征猜测点数（有限能力）"""
+        # 这是一个非常基础的方法，只能区分部分牌
+        # 建议尽快生成模板
+        return None
+
+    def _save_debug_card(self, card_img: np.ndarray, index: int,
+                         rank: Optional[str], suit: Optional[str]):
+        """保存调试图"""
+        debug_dir = "screenshots/debug/cards"
+        os.makedirs(debug_dir, exist_ok=True)
+        label = f"{rank or '?'}{suit or '?'}"
+        path = os.path.join(debug_dir, f"card_{index}_{label}.png")
+        cv2.imwrite(path, card_img)
 
 
 class ManualCardInput:
@@ -246,16 +319,13 @@ class ManualCardInput:
 
     @staticmethod
     def parse_card(card_str: str) -> Optional[str]:
-        """解析单张牌: 'Ah' -> 'Ah'"""
         card_str = card_str.strip()
 
         if len(card_str) == 2:
             rank = card_str[0].upper()
             suit = card_str[1].lower()
-
             if rank == "0":
                 rank = "T"
-
             if rank in RANKS and suit in SUITS:
                 return f"{rank}{suit}"
 
@@ -268,7 +338,6 @@ class ManualCardInput:
 
     @staticmethod
     def parse_hand(hand_str: str) -> List[str]:
-        """解析多张牌: 'Ah Kd Qs' -> ['Ah', 'Kd', 'Qs']"""
         hand_str = hand_str.replace(",", " ").replace("/", " ").strip()
         if not hand_str:
             return []

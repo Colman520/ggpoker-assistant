@@ -19,6 +19,8 @@ class Config:
         "recognition": {
             "match_threshold": 0.80,
             "card_aspect_ratio": 0.7,
+            "suit_min_pixel_ratio": 0.015,
+            "spade_brightness_threshold": 70,
         },
         "gui": {
             "opacity": 0.88,
