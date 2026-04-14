@@ -42,7 +42,10 @@
       726,
       232
     ],
-    "width": 320,
-    "height": 520
+    "width": 1200,
+    "height": 700,
+    "table_size": 6,
+    "position_index": 0,
+    "active_players": 6
   }
 }

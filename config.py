@@ -26,8 +26,11 @@ class Config:
             "opacity": 0.88,
             "always_on_top": True,
             "position": [50, 50],
-            "width": 320,
-            "height": 520,
+            "width": 1200,
+            "height": 700,
+            "table_size": 9,
+            "position_index": 0,
+            "active_players": 9,
         },
     }
 

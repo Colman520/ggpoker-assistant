@@ -16,6 +16,8 @@ try:
         QCheckBox,
         QDialog,
         QScrollArea,
+        QGridLayout,
+        QComboBox,
     )
     from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal
     from PyQt6.QtGui import QFont, QMouseEvent, QImage, QPixmap
@@ -91,6 +93,147 @@ if HAS_PYQT:
             display_h = min(h + 60, max_h + 60)
             self.resize(display_w, display_h)
 
+
+    class CardSelectorDialog(QDialog):
+        """扑克牌可视化选择器 - 精美版"""
+        def __init__(self, title, max_cards, current_selection, disabled_cards, parent=None):
+            super().__init__(parent)
+            self.setWindowTitle(title)
+            self.setWindowFlags(Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.Dialog)
+            self.max_cards = max_cards
+            self.selected_cards = list(current_selection)
+            self.disabled_cards = disabled_cards
+
+            layout = QVBoxLayout()
+            layout.setContentsMargins(20, 20, 20, 20)  # 增加外边距，让界面透气
+            layout.setSpacing(15)
+
+            # 顶部提示文字
+            self.info_label = QLabel(f"请选择 {max_cards} 张牌 ({len(self.selected_cards)}/{max_cards})")
+            self.info_label.setStyleSheet("color: #4ecca3; font-weight: bold; font-size: 16px; letter-spacing: 1px;")
+            layout.addWidget(self.info_label, alignment=Qt.AlignmentFlag.AlignCenter)
+
+            # 扑克牌网格
+            grid = QGridLayout()
+            grid.setSpacing(8)  # 卡片之间的间距
+            
+            ranks = ["A", "K", "Q", "J", "T", "9", "8", "7", "6", "5", "4", "3", "2"]
+            # 优化颜色：黑桃/梅花用亮白色，红心/方块用鲜红色
+            suits = [
+                ("s", "♠", "#ffffff"), 
+                ("h", "♥", "#ff4757"), 
+                ("c", "♣", "#ffffff"),
+                ("d", "♦", "#ff4757")
+            ]
+
+            self.buttons = {}
+            for row, (suit_code, suit_sym, base_color) in enumerate(suits):
+                for col, rank in enumerate(ranks):
+                    card_str = f"{rank}{suit_code}"
+                    display_rank = "10" if rank == "T" else rank
+                    
+                    # 使用 \n 换行，把点数和花色分开，呈现真实扑克牌的视觉效果
+                    btn = QPushButton(f"{display_rank}\n{suit_sym}")
+                    btn.setFixedSize(46, 68)  # 调整为扑克牌的长宽比
+                    btn.setFont(QFont("Arial", 13, QFont.Weight.Bold))
+                    
+                    if card_str in self.disabled_cards:
+                        btn.setEnabled(False)
+                    else:
+                        btn.clicked.connect(lambda checked, c=card_str: self.toggle_card(c))
+                        
+                    grid.addWidget(btn, row, col)
+                    self.buttons[card_str] = {"btn": btn, "color": base_color}
+
+            layout.addLayout(grid)
+
+            # 底部按钮区域 (居中且固定大小)
+            btn_layout = QHBoxLayout()
+            btn_layout.addStretch()  # 左侧弹簧
+            
+            clear_btn = QPushButton("清空")
+            clear_btn.setFixedSize(120, 36)
+            clear_btn.setStyleSheet("""
+                QPushButton { background-color: #e74c3c; color: white; border-radius: 18px; font-weight: bold; font-size: 14px; }
+                QPushButton:hover { background-color: #ff6b6b; }
+            """)
+            clear_btn.clicked.connect(self.clear_selection)
+            
+            confirm_btn = QPushButton("确定")
+            confirm_btn.setFixedSize(120, 36)
+            confirm_btn.setStyleSheet("""
+                QPushButton { background-color: #4ecca3; color: #1a1a2e; border-radius: 18px; font-weight: bold; font-size: 14px; }
+                QPushButton:hover { background-color: #7efcce; }
+            """)
+            confirm_btn.clicked.connect(self.accept)
+            
+            btn_layout.addWidget(clear_btn)
+            btn_layout.addSpacing(20) # 两个按钮中间的间距
+            btn_layout.addWidget(confirm_btn)
+            btn_layout.addStretch()  # 右侧弹簧
+            
+            layout.addLayout(btn_layout)
+
+            self.setLayout(layout)
+            self.setStyleSheet("QDialog { background-color: #1a1a2e; }")
+            self.update_buttons()
+
+        def toggle_card(self, card_str):
+            if card_str in self.selected_cards:
+                self.selected_cards.remove(card_str)
+            else:
+                if len(self.selected_cards) >= self.max_cards:
+                    return
+                self.selected_cards.append(card_str)
+            self.info_label.setText(f"请选择 {self.max_cards} 张牌 ({len(self.selected_cards)}/{self.max_cards})")
+            self.update_buttons()
+
+        def clear_selection(self):
+            self.selected_cards.clear()
+            self.info_label.setText(f"请选择 {self.max_cards} 张牌 (0/{self.max_cards})")
+            self.update_buttons()
+
+        def update_buttons(self):
+            """统一管理按钮的样式"""
+            for card_str, data in self.buttons.items():
+                btn = data["btn"]
+                if not btn.isEnabled():
+                    btn.setStyleSheet("""
+                        QPushButton {
+                            background-color: #161622;
+                            color: #333333;
+                            border: 1px solid #222;
+                            border-radius: 6px;
+                        }
+                    """)
+                    continue
+                    
+                if card_str in self.selected_cards:
+                    # 选中状态：主色调背景，深色文字，发光边框
+                    btn.setStyleSheet("""
+                        QPushButton {
+                            background-color: #4ecca3;
+                            color: #1a1a2e;
+                            border: 2px solid #ffffff;
+                            border-radius: 6px;
+                            font-weight: bold;
+                        }
+                    """)
+                else:
+                    # 正常状态：深色背景，对应花色文字，支持鼠标悬浮效果
+                    btn.setStyleSheet(f"""
+                        QPushButton {{
+                            background-color: #26263a;
+                            color: {data['color']};
+                            border: 1px solid #3f3f5a;
+                            border-radius: 6px;
+                        }}
+                        QPushButton:hover {{
+                            background-color: #32324a;
+                            border: 1px solid #4ecca3;
+                        }}
+                    """)
+
     class CalcWorker(QThread):
         """后台计算线程，避免UI卡死"""
         finished = pyqtSignal(list, list, dict)
@@ -112,6 +255,7 @@ if HAS_PYQT:
             except Exception as e:
                 self.error.emit(str(e))
 
+
     class PokerAssistantGUI(QWidget):
         """GGPoker 助手悬浮窗"""
 
@@ -130,11 +274,19 @@ if HAS_PYQT:
             self._last_recognized = None
             self._calc_worker = None
             self._image_dialog = None  # 保持引用防止被回收
+            self._table_size = 9
+            self._position_index = 0
+            self._active_players = 9
 
             self.init_ui()
 
         def init_ui(self):
             gui_config = self.config["gui"]
+            self._table_size = int(gui_config.get("table_size", 9))
+            if self._table_size not in (6, 9):
+                self._table_size = 9
+            self._position_index = int(gui_config.get("position_index", 0))
+            self._active_players = int(gui_config.get("active_players", self._table_size))
 
             self.setWindowTitle("🃏 GGPoker Assistant")
             self.setWindowFlags(
@@ -149,89 +301,119 @@ if HAS_PYQT:
             self.setStyleSheet(
                 """
                 QWidget {
-                    background-color: #1a1a2e;
-                    color: #eee;
+                    background-color: #0f1220;
+                    color: #e8ecff;
                     font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
                 }
                 QGroupBox {
-                    border: 1px solid #333;
-                    border-radius: 6px;
-                    margin-top: 8px;
-                    padding-top: 14px;
-                    font-weight: bold;
-                    color: #4ecca3;
+                    background-color: #141a2d;
+                    border: 1px solid #2a3558;
+                    border-radius: 10px;
+                    margin-top: 12px;
+                    padding: 14px 12px 12px 12px;
+                    font-weight: 600;
+                    color: #74e7ca;
                 }
                 QGroupBox::title {
                     subcontrol-origin: margin;
-                    left: 10px;
-                    padding: 0 5px;
+                    left: 12px;
+                    padding: 0 6px;
+                    color: #7ef2d4;
                 }
                 QPushButton {
-                    background-color: #4ecca3;
-                    color: #1a1a2e;
-                    border: none;
-                    padding: 8px 16px;
-                    border-radius: 4px;
-                    font-weight: bold;
+                    background-color: #43d3ad;
+                    color: #102136;
+                    border: 1px solid #57e9c1;
+                    padding: 9px 16px;
+                    border-radius: 8px;
+                    font-weight: 700;
                     font-size: 13px;
                 }
-                QPushButton:hover { background-color: #7efcce; }
-                QPushButton:pressed { background-color: #36b58e; }
-                QPushButton:disabled { background-color: #555; color: #888; }
+                QPushButton:hover {
+                    background-color: #5be8c3;
+                    border-color: #7ef8d7;
+                }
+                QPushButton:pressed {
+                    background-color: #2cb48f;
+                    border-color: #3fc8a1;
+                }
+                QPushButton:disabled {
+                    background-color: #2d3550;
+                    border-color: #3b4568;
+                    color: #7e89af;
+                }
                 QLineEdit {
-                    background-color: #16213e;
-                    border: 1px solid #444;
-                    border-radius: 4px;
-                    padding: 6px;
-                    color: #eee;
+                    background-color: #1a2442;
+                    border: 1px solid #344166;
+                    border-radius: 8px;
+                    padding: 8px 10px;
+                    color: #ecf1ff;
                     font-size: 14px;
                 }
+                QLineEdit:focus {
+                    border: 1px solid #63e8c5;
+                }
+                QComboBox {
+                    background-color: #1a2442;
+                    border: 1px solid #344166;
+                    border-radius: 8px;
+                    padding: 4px 10px;
+                    color: #ecf1ff;
+                    min-height: 28px;
+                }
+                QComboBox:hover {
+                    border: 1px solid #63e8c5;
+                }
+                QComboBox::drop-down {
+                    border: none;
+                    width: 24px;
+                }
                 QSpinBox {
-                    background-color: #16213e;
-                    border: 1px solid #444;
-                    border-radius: 4px;
+                    background-color: #1a2442;
+                    border: 1px solid #344166;
+                    border-radius: 8px;
                     padding: 4px 8px;
-                    color: #eee;
+                    color: #ecf1ff;
                     font-size: 14px;
                     min-width: 50px;
                     min-height: 28px;
                 }
                 QSpinBox::up-button, QSpinBox::down-button {
-                    background-color: #2a2a4a;
-                    border: 1px solid #444;
+                    background-color: #263153;
+                    border: 1px solid #3a4770;
                     width: 20px;
                 }
                 QSpinBox::up-button:hover, QSpinBox::down-button:hover {
-                    background-color: #4ecca3;
+                    background-color: #57dcb9;
                 }
                 QSpinBox::up-arrow {
                     image: none;
                     border-left: 5px solid transparent;
                     border-right: 5px solid transparent;
-                    border-bottom: 5px solid #ccc;
+                    border-bottom: 5px solid #e6f2ff;
                     width: 0; height: 0;
                 }
                 QSpinBox::down-arrow {
                     image: none;
                     border-left: 5px solid transparent;
                     border-right: 5px solid transparent;
-                    border-top: 5px solid #ccc;
+                    border-top: 5px solid #e6f2ff;
                     width: 0; height: 0;
                 }
-                QLabel { color: #ccc; }
-                QCheckBox { color: #ccc; font-size: 11px; }
+                QLabel { color: #d4dbf3; }
+                QCheckBox { color: #bac5e8; font-size: 11px; }
                 QCheckBox::indicator {
                     width: 14px; height: 14px;
-                    border: 1px solid #555; border-radius: 3px;
-                    background: #16213e;
+                    border: 1px solid #4f5d85; border-radius: 4px;
+                    background: #1a2442;
                 }
-                QCheckBox::indicator:checked { background: #4ecca3; }
+                QCheckBox::indicator:checked { background: #4fd9b4; }
             """
             )
 
             main_layout = QVBoxLayout()
-            main_layout.setSpacing(6)
-            main_layout.setContentsMargins(10, 8, 10, 8)
+            main_layout.setSpacing(10)
+            main_layout.setContentsMargins(14, 12, 14, 12)
 
             # ===== 标题栏 =====
             title_bar = QHBoxLayout()
@@ -246,8 +428,8 @@ if HAS_PYQT:
             close_btn.setFixedSize(24, 24)
             close_btn.setStyleSheet(
                 """
-                QPushButton { background: transparent; color: #888; font-size: 16px; padding: 0; }
-                QPushButton:hover { color: #e74c3c; }
+                QPushButton { background: transparent; color: #8fa0d2; font-size: 16px; padding: 0; border: none; }
+                QPushButton:hover { color: #ff6c7c; background: #1f2742; border-radius: 6px; }
             """
             )
             close_btn.clicked.connect(self.close)
@@ -263,37 +445,72 @@ if HAS_PYQT:
             input_group = QGroupBox("📝 手动输入")
             input_layout = QVBoxLayout()
 
+            self._manual_my_cards = []         # 保存手动选择的手牌
+            self._manual_comm_cards = []       # 保存手动选择的公共牌
+
             hand_row = QHBoxLayout()
             hand_label = QLabel("手牌:")
             hand_label.setFixedWidth(55)
             hand_row.addWidget(hand_label)
-            self.hand_input = QLineEdit()
-            self.hand_input.setPlaceholderText("如: Ah Kh")
-            self.hand_input.returnPressed.connect(self.manual_calculate)
-            hand_row.addWidget(self.hand_input)
+            self.hand_btn = QPushButton("点击选择手牌")
+            self.hand_btn.setStyleSheet(
+                "background-color: #1a2442; color: #ecf1ff; border: 1px solid #344166; "
+                "text-align: left; padding-left: 12px; border-radius: 8px;"
+            )
+            self.hand_btn.clicked.connect(self.open_hand_selector)
+            hand_row.addWidget(self.hand_btn)
             input_layout.addLayout(hand_row)
 
             comm_row = QHBoxLayout()
             comm_label = QLabel("公共牌:")
             comm_label.setFixedWidth(55)
             comm_row.addWidget(comm_label)
-            self.community_input = QLineEdit()
-            self.community_input.setPlaceholderText("如: Qh Jh 3c")
-            self.community_input.returnPressed.connect(self.manual_calculate)
-            comm_row.addWidget(self.community_input)
+            self.community_btn = QPushButton("点击选择公共牌")
+            self.community_btn.setStyleSheet(
+                "background-color: #1a2442; color: #ecf1ff; border: 1px solid #344166; "
+                "text-align: left; padding-left: 12px; border-radius: 8px;"
+            )
+            self.community_btn.clicked.connect(self.open_community_selector)
+            comm_row.addWidget(self.community_btn)
             input_layout.addLayout(comm_row)
 
-            opp_row = QHBoxLayout()
-            opp_label = QLabel("对手数:")
-            opp_label.setFixedWidth(55)
-            opp_row.addWidget(opp_label)
-            self.opponent_spin = QSpinBox()
-            self.opponent_spin.setRange(1, 9)
-            self.opponent_spin.setValue(self.config["default_opponents"])
-            self.opponent_spin.setFixedSize(80, 32)
-            opp_row.addWidget(self.opponent_spin)
-            opp_row.addStretch()
-            input_layout.addLayout(opp_row)
+            table_row = QHBoxLayout()
+            table_label = QLabel("人数:")
+            table_label.setFixedWidth(55)
+            table_row.addWidget(table_label)
+            self.table_size_combo = QComboBox()
+            self.table_size_combo.addItems(["6人桌", "9人桌"])
+            self.table_size_combo.setFixedSize(120, 32)
+            self.table_size_combo.setCurrentIndex(0 if self._table_size == 6 else 1)
+            self.table_size_combo.currentTextChanged.connect(self._on_table_size_changed)
+            table_row.addWidget(self.table_size_combo)
+            table_row.addStretch()
+            input_layout.addLayout(table_row)
+
+            pos_row = QHBoxLayout()
+            pos_label = QLabel("位置:")
+            pos_label.setFixedWidth(55)
+            pos_row.addWidget(pos_label)
+            self.position_combo = QComboBox()
+            self.position_combo.setFixedSize(180, 32)
+            self._refresh_position_options()
+            self.position_combo.currentIndexChanged.connect(self._on_position_changed)
+            pos_row.addWidget(self.position_combo)
+            pos_row.addStretch()
+            input_layout.addLayout(pos_row)
+
+            active_row = QHBoxLayout()
+            active_label = QLabel("在局:")
+            active_label.setFixedWidth(55)
+            active_row.addWidget(active_label)
+            self.active_players_spin = QSpinBox()
+            self.active_players_spin.setFixedSize(90, 32)
+            self.active_players_spin.valueChanged.connect(self._on_active_players_changed)
+            active_row.addWidget(self.active_players_spin)
+            active_row.addWidget(QLabel("人"))
+            active_row.addStretch()
+            input_layout.addLayout(active_row)
+            self._sync_active_players_limit()
 
             calc_btn = QPushButton("📊 计算胜率")
             calc_btn.clicked.connect(self.manual_calculate)
@@ -336,7 +553,7 @@ if HAS_PYQT:
             self.suggestion_label.setStyleSheet(
                 """
                 font-size: 15px; font-weight: bold; padding: 8px;
-                background-color: #16213e; border-radius: 6px;
+                background-color: #1a2442; border-radius: 8px; color: #e9efff;
             """
             )
             result_layout.addWidget(self.suggestion_label)
@@ -417,31 +634,38 @@ if HAS_PYQT:
 
         # ===== 手动计算 =====
 
+        def _format_cards_for_btn(self, cards):
+            if not cards:
+                return ""
+            suit_symbols = {"s": "♠", "h": "♥", "d": "♦", "c": "♣"}
+            res = []
+            for c in cards:
+                rank = "10" if c[0] == "T" else c[0]
+                res.append(f"{rank}{suit_symbols.get(c[1], c[1])}")
+            return " ".join(res)
+
+        def open_hand_selector(self):
+            dialog = CardSelectorDialog("选择手牌 (2张)", 2, self._manual_my_cards, self._manual_comm_cards, self)
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                self._manual_my_cards = dialog.selected_cards
+                text = self._format_cards_for_btn(self._manual_my_cards)
+                self.hand_btn.setText(text if text else "点击选择手牌")
+
+        def open_community_selector(self):
+            dialog = CardSelectorDialog("选择公共牌 (最多5张)", 5, self._manual_comm_cards, self._manual_my_cards, self)
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                self._manual_comm_cards = dialog.selected_cards
+                text = self._format_cards_for_btn(self._manual_comm_cards)
+                self.community_btn.setText(text if text else "点击选择公共牌")
+
         def manual_calculate(self):
             """手动计算胜率"""
-            hand_str = self.hand_input.text().strip()
-            comm_str = self.community_input.text().strip()
-            num_opp = self.opponent_spin.value()
+            num_opp = self._get_num_opponents()
+            my_cards = self._manual_my_cards
+            community_cards = self._manual_comm_cards
 
-            if not hand_str:
-                self.status_label.setText("⚠️ 请输入手牌")
-                return
-
-            my_cards = ManualCardInput.parse_hand(hand_str)
             if len(my_cards) != 2:
-                self.status_label.setText("⚠️ 手牌格式错误，需要2张牌 (如: Ah Kh)")
-                return
-
-            community_cards = []
-            if comm_str:
-                community_cards = ManualCardInput.parse_hand(comm_str)
-                if len(community_cards) > 5:
-                    self.status_label.setText("⚠️ 公共牌最多5张")
-                    return
-
-            all_cards = my_cards + community_cards
-            if len(set(all_cards)) != len(all_cards):
-                self.status_label.setText("⚠️ 有重复的牌！")
+                self.status_label.setText("⚠️ 请先选择 2 张手牌")
                 return
 
             self.status_label.setText("🔄 计算中...")
@@ -475,7 +699,9 @@ if HAS_PYQT:
                 else "--"
             )
 
-            self.cards_label.setText(f"手牌: {hand_str}  |  公共牌: {comm_str}")
+            self.cards_label.setText(
+                f"手牌: {hand_str}  |  公共牌: {comm_str}  |  {self._table_size}人桌 | {self._get_position_name()} | 在局{self._active_players}人"
+            )
             self.hand_type_label.setText(f"牌型: {result['hand_name']}")
 
             win_pct = result["win_rate"] * 100
@@ -569,7 +795,7 @@ if HAS_PYQT:
                         return
                     self._last_recognized = current_key
 
-                    num_opp = self.opponent_spin.value()
+                    num_opp = self._get_num_opponents()
 
                     if self._calc_worker and self._calc_worker.isRunning():
                         return
@@ -600,6 +826,47 @@ if HAS_PYQT:
 
         def _on_calc_error(self, error_msg):
             self.status_label.setText(f"❌ 计算错误: {error_msg[:40]}")
+
+        def _on_table_size_changed(self, text):
+            self._table_size = 6 if text.startswith("6") else 9
+            self._refresh_position_options()
+            self._sync_active_players_limit()
+            self.status_label.setText(
+                f"ℹ️ 已切换为{self._table_size}人桌（对手数: {self._get_num_opponents()}）"
+            )
+
+        def _on_position_changed(self, index):
+            if index >= 0:
+                self._position_index = index
+
+        def _on_active_players_changed(self, value):
+            self._active_players = int(value)
+
+        def _sync_active_players_limit(self):
+            self._active_players = min(max(self._active_players, 2), self._table_size)
+            self.active_players_spin.setRange(2, self._table_size)
+            self.active_players_spin.setValue(self._active_players)
+
+        def _refresh_position_options(self):
+            current_names = self._position_names()
+            self.position_combo.blockSignals(True)
+            self.position_combo.clear()
+            self.position_combo.addItems(current_names)
+            self._position_index = min(max(self._position_index, 0), len(current_names) - 1)
+            self.position_combo.setCurrentIndex(self._position_index)
+            self.position_combo.blockSignals(False)
+
+        def _position_names(self):
+            if self._table_size == 6:
+                return ["UTG", "HJ", "CO", "BTN", "SB", "BB"]
+            return ["UTG", "UTG+1", "UTG+2", "LJ", "HJ", "CO", "BTN", "SB", "BB"]
+
+        def _get_position_name(self):
+            names = self._position_names()
+            return names[self._position_index]
+
+        def _get_num_opponents(self):
+            return max(1, self._active_players - 1)
 
         # ===== 调试功能 =====
 
@@ -763,6 +1030,9 @@ if HAS_PYQT:
             """关闭时保存窗口位置"""
             pos = self.pos()
             self.config["gui"]["position"] = [pos.x(), pos.y()]
+            self.config["gui"]["table_size"] = self._table_size
+            self.config["gui"]["position_index"] = self._position_index
+            self.config["gui"]["active_players"] = self._active_players
             try:
                 self.config.save()
             except Exception:
