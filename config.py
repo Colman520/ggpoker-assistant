@@ -30,7 +30,10 @@ class Config:
             "height": 700,
             "table_size": 9,
             "position_index": 0,
-            "active_players": 9,
+            "remaining_opponents": 8,
+            "pot_size_bb": 0.0,
+            "call_amount_bb": 0.0,
+            "effective_stack_bb": 100.0,
         },
     }
 

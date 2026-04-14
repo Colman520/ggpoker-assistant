@@ -6,6 +6,10 @@ import sys
 import os
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 PASS = "✅"
 FAIL = "❌"
@@ -234,9 +238,11 @@ def test_odds_calculator():
         assert "suggestion" in result, "结果缺少 suggestion"
         assert "hand_name" in result, "结果缺少 hand_name"
         assert "outs" in result, "结果缺少 outs"
+        assert "equity" in result, "结果缺少 equity"
 
         win = result["win_rate"]
         assert 0 <= win <= 1, f"胜率 {win} 超出范围"
+        assert 0 <= result["equity"] <= 1, f"equity {result['equity']} 超出范围"
 
         total = result["win_rate"] + result["tie_rate"] + result["lose_rate"]
         assert abs(total - 1.0) < 0.05, f"胜/平/负之和 = {total}，应接近 1.0"

@@ -12,6 +12,7 @@ try:
         QGroupBox,
         QLineEdit,
         QSpinBox,
+        QDoubleSpinBox,
         QFrame,
         QCheckBox,
         QDialog,
@@ -239,17 +240,45 @@ if HAS_PYQT:
         finished = pyqtSignal(list, list, dict)
         error = pyqtSignal(str)
 
-        def __init__(self, calculator, my_cards, community_cards, num_opp):
+        def __init__(
+            self,
+            calculator,
+            my_cards,
+            community_cards,
+            num_opp,
+            table_size,
+            position,
+            remaining_opponents,
+            pot_size,
+            call_amount,
+            effective_stack_bb,
+            opponent_action,
+        ):
             super().__init__()
             self.calculator = calculator
             self.my_cards = my_cards
             self.community_cards = community_cards
             self.num_opp = num_opp
+            
+            self.table_size = table_size
+            self.position = position
+            self.remaining_opponents = remaining_opponents
+            self.pot_size = pot_size
+            self.call_amount = call_amount
+            self.effective_stack_bb = effective_stack_bb
+            self.opponent_action = opponent_action
 
         def run(self):
             try:
                 result = self.calculator.calculate_odds(
-                    self.my_cards, self.community_cards, self.num_opp
+                    self.my_cards, self.community_cards, self.num_opp,
+                    table_size=self.table_size, 
+                    position=self.position, 
+                    remaining_opponents=self.remaining_opponents,
+                    pot_size=self.pot_size,
+                    call_amount=self.call_amount,
+                    effective_stack_bb=self.effective_stack_bb,
+                    opponent_action=self.opponent_action,
                 )
                 self.finished.emit(self.my_cards, self.community_cards, result)
             except Exception as e:
@@ -276,7 +305,9 @@ if HAS_PYQT:
             self._image_dialog = None  # 保持引用防止被回收
             self._table_size = 9
             self._position_index = 0
-            self._active_players = 9
+            self._remaining_opponents = 8
+            self._pot_size_bb = 0.0
+            self._call_amount_bb = 0.0
 
             self.init_ui()
 
@@ -286,7 +317,15 @@ if HAS_PYQT:
             if self._table_size not in (6, 9):
                 self._table_size = 9
             self._position_index = int(gui_config.get("position_index", 0))
-            self._active_players = int(gui_config.get("active_players", self._table_size))
+            self._effective_stack_bb = float(gui_config.get("effective_stack_bb", 100.0))
+            self._pot_size_bb = float(gui_config.get("pot_size_bb", 0.0))
+            self._call_amount_bb = float(gui_config.get("call_amount_bb", 0.0))
+            if "remaining_opponents" in gui_config:
+                self._remaining_opponents = int(gui_config.get("remaining_opponents", self._table_size - 1))
+            else:
+                # 兼容旧配置 active_players(含自己)
+                legacy_active = int(gui_config.get("active_players", self._table_size))
+                self._remaining_opponents = max(1, legacy_active - 1)
 
             self.setWindowTitle("🃏 GGPoker Assistant")
             self.setWindowFlags(
@@ -295,119 +334,120 @@ if HAS_PYQT:
                 | Qt.WindowType.Tool
             )
             self.setWindowOpacity(max(gui_config["opacity"], 0.95))
-            self.setFixedWidth(gui_config["width"])
-            self.setMinimumHeight(gui_config["height"])
+            panel_width = max(520, min(int(gui_config["width"]), 640))
+            panel_height = max(620, min(int(gui_config["height"]), 860))
+            self.setFixedWidth(panel_width)
+            self.setMinimumHeight(panel_height)
 
             self.setStyleSheet(
                 """
                 QWidget {
-                    background-color: #0f1220;
-                    color: #e8ecff;
+                    background-color: #11131a;
+                    color: #eef2ff;
                     font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
                 }
                 QGroupBox {
-                    background-color: #141a2d;
-                    border: 1px solid #2a3558;
-                    border-radius: 10px;
+                    background-color: #171b24;
+                    border: 1px solid #272d3b;
+                    border-radius: 14px;
                     margin-top: 12px;
-                    padding: 14px 12px 12px 12px;
-                    font-weight: 600;
-                    color: #74e7ca;
+                    padding: 16px 14px 14px 14px;
+                    font-weight: 700;
+                    color: #cfd7ff;
                 }
                 QGroupBox::title {
                     subcontrol-origin: margin;
-                    left: 12px;
+                    left: 14px;
                     padding: 0 6px;
-                    color: #7ef2d4;
+                    color: #a7b4ff;
                 }
                 QPushButton {
-                    background-color: #43d3ad;
-                    color: #102136;
-                    border: 1px solid #57e9c1;
+                    background-color: #6d7cff;
+                    color: #f8f9ff;
+                    border: 1px solid #7f8cff;
                     padding: 9px 16px;
-                    border-radius: 8px;
+                    border-radius: 10px;
                     font-weight: 700;
                     font-size: 13px;
                 }
                 QPushButton:hover {
-                    background-color: #5be8c3;
-                    border-color: #7ef8d7;
+                    background-color: #7d8aff;
+                    border-color: #9aa5ff;
                 }
                 QPushButton:pressed {
-                    background-color: #2cb48f;
-                    border-color: #3fc8a1;
+                    background-color: #5b69e6;
+                    border-color: #7884ff;
                 }
                 QPushButton:disabled {
-                    background-color: #2d3550;
-                    border-color: #3b4568;
-                    color: #7e89af;
+                    background-color: #2a3142;
+                    border-color: #32394c;
+                    color: #7f879e;
                 }
                 QLineEdit {
-                    background-color: #1a2442;
-                    border: 1px solid #344166;
-                    border-radius: 8px;
+                    background-color: #202532;
+                    border: 1px solid #303748;
+                    border-radius: 10px;
                     padding: 8px 10px;
                     color: #ecf1ff;
                     font-size: 14px;
                 }
                 QLineEdit:focus {
-                    border: 1px solid #63e8c5;
+                    border: 1px solid #8896ff;
                 }
-                QComboBox {
-                    background-color: #1a2442;
-                    border: 1px solid #344166;
-                    border-radius: 8px;
+                QComboBox, QSpinBox, QDoubleSpinBox {
+                    background-color: #202532;
+                    border: 1px solid #303748;
+                    border-radius: 10px;
                     padding: 4px 10px;
                     color: #ecf1ff;
-                    min-height: 28px;
+                    min-height: 30px;
+                    font-size: 14px;
                 }
-                QComboBox:hover {
-                    border: 1px solid #63e8c5;
+                QComboBox {
+                    padding-right: 10px;
+                }
+                QComboBox:hover, QSpinBox:hover, QDoubleSpinBox:hover {
+                    border: 1px solid #8896ff;
+                }
+                QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus {
+                    border: 1px solid #98a5ff;
                 }
                 QComboBox::drop-down {
                     border: none;
                     width: 24px;
                 }
-                QSpinBox {
-                    background-color: #1a2442;
-                    border: 1px solid #344166;
-                    border-radius: 8px;
-                    padding: 4px 8px;
-                    color: #ecf1ff;
-                    font-size: 14px;
-                    min-width: 50px;
-                    min-height: 28px;
-                }
-                QSpinBox::up-button, QSpinBox::down-button {
-                    background-color: #263153;
-                    border: 1px solid #3a4770;
+                QSpinBox::up-button, QSpinBox::down-button,
+                QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {
+                    background-color: #272e3c;
+                    border: 1px solid #394156;
                     width: 20px;
                 }
-                QSpinBox::up-button:hover, QSpinBox::down-button:hover {
-                    background-color: #57dcb9;
+                QSpinBox::up-button:hover, QSpinBox::down-button:hover,
+                QDoubleSpinBox::up-button:hover, QDoubleSpinBox::down-button:hover {
+                    background-color: #6c78d9;
                 }
-                QSpinBox::up-arrow {
+                QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {
                     image: none;
                     border-left: 5px solid transparent;
                     border-right: 5px solid transparent;
-                    border-bottom: 5px solid #e6f2ff;
+                    border-bottom: 5px solid #edf1ff;
                     width: 0; height: 0;
                 }
-                QSpinBox::down-arrow {
+                QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {
                     image: none;
                     border-left: 5px solid transparent;
                     border-right: 5px solid transparent;
-                    border-top: 5px solid #e6f2ff;
+                    border-top: 5px solid #edf1ff;
                     width: 0; height: 0;
                 }
-                QLabel { color: #d4dbf3; }
+                QLabel { color: #d7dcef; }
                 QCheckBox { color: #bac5e8; font-size: 11px; }
                 QCheckBox::indicator {
                     width: 14px; height: 14px;
                     border: 1px solid #4f5d85; border-radius: 4px;
-                    background: #1a2442;
+                    background: #202532;
                 }
-                QCheckBox::indicator:checked { background: #4fd9b4; }
+                QCheckBox::indicator:checked { background: #7d8aff; }
             """
             )
 
@@ -417,9 +457,9 @@ if HAS_PYQT:
 
             # ===== 标题栏 =====
             title_bar = QHBoxLayout()
-            title_label = QLabel("🃏 GGPoker Assistant")
+            title_label = QLabel("GGPoker Assistant")
             title_label.setStyleSheet(
-                "color: #4ecca3; font-size: 18px; font-weight: bold;"
+                "color: #f5f7ff; font-size: 20px; font-weight: 700; letter-spacing: 0.4px;"
             )
             title_bar.addWidget(title_label)
             title_bar.addStretch()
@@ -428,8 +468,8 @@ if HAS_PYQT:
             close_btn.setFixedSize(24, 24)
             close_btn.setStyleSheet(
                 """
-                QPushButton { background: transparent; color: #8fa0d2; font-size: 16px; padding: 0; border: none; }
-                QPushButton:hover { color: #ff6c7c; background: #1f2742; border-radius: 6px; }
+                QPushButton { background: transparent; color: #98a0ba; font-size: 16px; padding: 0; border: none; }
+                QPushButton:hover { color: #ffffff; background: #282e3a; border-radius: 6px; }
             """
             )
             close_btn.clicked.connect(self.close)
@@ -438,7 +478,7 @@ if HAS_PYQT:
 
             line = QFrame()
             line.setFrameShape(QFrame.Shape.HLine)
-            line.setStyleSheet("color: #333;")
+            line.setStyleSheet("color: #252a35;")
             main_layout.addWidget(line)
 
             # ===== 手动输入区域 =====
@@ -454,8 +494,8 @@ if HAS_PYQT:
             hand_row.addWidget(hand_label)
             self.hand_btn = QPushButton("点击选择手牌")
             self.hand_btn.setStyleSheet(
-                "background-color: #1a2442; color: #ecf1ff; border: 1px solid #344166; "
-                "text-align: left; padding-left: 12px; border-radius: 8px;"
+                "background-color: #202532; color: #f4f6ff; border: 1px solid #303748; "
+                "text-align: left; padding-left: 12px; border-radius: 10px; font-weight: 600;"
             )
             self.hand_btn.clicked.connect(self.open_hand_selector)
             hand_row.addWidget(self.hand_btn)
@@ -467,8 +507,8 @@ if HAS_PYQT:
             comm_row.addWidget(comm_label)
             self.community_btn = QPushButton("点击选择公共牌")
             self.community_btn.setStyleSheet(
-                "background-color: #1a2442; color: #ecf1ff; border: 1px solid #344166; "
-                "text-align: left; padding-left: 12px; border-radius: 8px;"
+                "background-color: #202532; color: #f4f6ff; border: 1px solid #303748; "
+                "text-align: left; padding-left: 12px; border-radius: 10px; font-weight: 600;"
             )
             self.community_btn.clicked.connect(self.open_community_selector)
             comm_row.addWidget(self.community_btn)
@@ -500,21 +540,87 @@ if HAS_PYQT:
             input_layout.addLayout(pos_row)
 
             active_row = QHBoxLayout()
-            active_label = QLabel("在局:")
+            active_label = QLabel("剩余:")
             active_label.setFixedWidth(55)
             active_row.addWidget(active_label)
-            self.active_players_spin = QSpinBox()
-            self.active_players_spin.setFixedSize(90, 32)
-            self.active_players_spin.valueChanged.connect(self._on_active_players_changed)
-            active_row.addWidget(self.active_players_spin)
+            self.remaining_opponents_spin = QSpinBox()
+            self.remaining_opponents_spin.setFixedSize(90, 32)
+            self.remaining_opponents_spin.valueChanged.connect(self._on_remaining_opponents_changed)
+            active_row.addWidget(self.remaining_opponents_spin)
             active_row.addWidget(QLabel("人"))
             active_row.addStretch()
             input_layout.addLayout(active_row)
-            self._sync_active_players_limit()
+            self._sync_remaining_opponents_limit()
+            
+            action_row = QHBoxLayout()
+            action_label = QLabel("对手动作:")
+            action_label.setFixedWidth(55)
+            action_row.addWidget(action_label)
+            self.opponent_action_combo = QComboBox()
+            self.opponent_action_combo.addItems(["Limp / Check", "Open Raise", "Call Raise", "3-Bet", "4-Bet+"])
+            self.opponent_action_combo.setFixedSize(120, 32)
+            self.opponent_action_combo.setCurrentIndex(1)  # 默认 Open Raise
+            action_row.addWidget(self.opponent_action_combo)
+            action_row.addStretch()
+            input_layout.addLayout(action_row)
+
+            pot_row = QHBoxLayout()
+            pot_label = QLabel("底池:")
+            pot_label.setFixedWidth(55)
+            pot_row.addWidget(pot_label)
+            self.pot_spin = QDoubleSpinBox()
+            self.pot_spin.setFixedSize(110, 32)
+            self.pot_spin.setRange(0.0, 9999.0)
+            self.pot_spin.setDecimals(1)
+            self.pot_spin.setSingleStep(0.5)
+            self.pot_spin.setSuffix(" BB")
+            self.pot_spin.setValue(max(0.0, self._pot_size_bb))
+            pot_row.addWidget(self.pot_spin)
+            call_label = QLabel("跟注:")
+            call_label.setFixedWidth(45)
+            pot_row.addWidget(call_label)
+            self.call_spin = QDoubleSpinBox()
+            self.call_spin.setFixedSize(110, 32)
+            self.call_spin.setRange(0.0, 9999.0)
+            self.call_spin.setDecimals(1)
+            self.call_spin.setSingleStep(0.5)
+            self.call_spin.setSuffix(" BB")
+            self.call_spin.setValue(max(0.0, self._call_amount_bb))
+            pot_row.addWidget(self.call_spin)
+            pot_row.addStretch()
+            input_layout.addLayout(pot_row)
+
+            spr_row = QHBoxLayout()
+            spr_label = QLabel("筹码:")
+            spr_label.setFixedWidth(55)
+            spr_row.addWidget(spr_label)
+            self.effective_stack_spin = QDoubleSpinBox()
+            self.effective_stack_spin.setFixedSize(110, 32)
+            self.effective_stack_spin.setRange(0.0, 9999.0)
+            self.effective_stack_spin.setDecimals(1)
+            self.effective_stack_spin.setSingleStep(1.0)
+            self.effective_stack_spin.setValue(max(0.0, self._effective_stack_bb))
+            self.effective_stack_spin.setSuffix(" BB")
+            spr_row.addWidget(self.effective_stack_spin)
+            spr_row.addWidget(QLabel("用于SPR"))
+            spr_row.addStretch()
+            input_layout.addLayout(spr_row)
 
             calc_btn = QPushButton("📊 计算胜率")
             calc_btn.clicked.connect(self.manual_calculate)
-            input_layout.addWidget(calc_btn)
+            
+            reset_btn = QPushButton("🔄 重置")
+            reset_btn.setStyleSheet(
+                "background-color: #4a5568; color: #f4f6ff; border: 1px solid #5a6578; "
+                "border-radius: 10px; font-weight: 600;"
+            )
+            reset_btn.clicked.connect(self.reset_all_inputs)
+
+            btn_layout = QHBoxLayout()
+            btn_layout.addWidget(calc_btn, 3)
+            btn_layout.addWidget(reset_btn, 1)
+            
+            input_layout.addLayout(btn_layout)
 
             input_group.setLayout(input_layout)
             main_layout.addWidget(input_group)
@@ -524,16 +630,20 @@ if HAS_PYQT:
             result_layout = QVBoxLayout()
 
             self.cards_label = QLabel("手牌: -- | 公共牌: --")
-            self.cards_label.setStyleSheet("font-size: 13px;")
+            self.cards_label.setStyleSheet("font-size: 13px; color: #bcc5dc;")
             result_layout.addWidget(self.cards_label)
 
             self.hand_type_label = QLabel("牌型: --")
-            self.hand_type_label.setStyleSheet("font-size: 13px; color: #f0a500;")
+            self.hand_type_label.setStyleSheet("font-size: 13px; color: #ffcc7a;")
             result_layout.addWidget(self.hand_type_label)
+
+            self.texture_label = QLabel("牌面结构: --")
+            self.texture_label.setStyleSheet("font-size: 13px; color: #a7b4ff;")
+            result_layout.addWidget(self.texture_label)
 
             self.win_rate_label = QLabel("胜率: --%")
             self.win_rate_label.setStyleSheet(
-                "color: #4ecca3; font-size: 28px; font-weight: bold;"
+                "color: #7d8aff; font-size: 34px; font-weight: 800;"
             )
             self.win_rate_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             result_layout.addWidget(self.win_rate_label)
@@ -546,14 +656,23 @@ if HAS_PYQT:
             result_layout.addLayout(prob_layout)
 
             self.outs_label = QLabel("补牌(Outs): -- | 中牌率: --%")
+            self.outs_label.setStyleSheet("color: #b6c0d9;")
             result_layout.addWidget(self.outs_label)
+
+            self.pot_odds_label = QLabel("底池赔率: -- | 需求胜率: --")
+            self.pot_odds_label.setStyleSheet("font-size: 12px; color: #96a6cf;")
+            result_layout.addWidget(self.pot_odds_label)
+            self.ev_spr_label = QLabel("EV: -- | MDF: -- | SPR: -- | 弃牌率: --")
+            self.ev_spr_label.setStyleSheet("font-size: 12px; color: #8ca0d0;")
+            result_layout.addWidget(self.ev_spr_label)
 
             self.suggestion_label = QLabel("建议: --")
             self.suggestion_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self.suggestion_label.setStyleSheet(
                 """
-                font-size: 15px; font-weight: bold; padding: 8px;
-                background-color: #1a2442; border-radius: 8px; color: #e9efff;
+                font-size: 15px; font-weight: 700; padding: 10px 12px;
+                background-color: #202532; border: 1px solid #303748;
+                border-radius: 10px; color: #f3f6ff;
             """
             )
             result_layout.addWidget(self.suggestion_label)
@@ -561,43 +680,47 @@ if HAS_PYQT:
             result_group.setLayout(result_layout)
             main_layout.addWidget(result_group)
 
-            # ===== 自动识别控制 =====
-            auto_group = QGroupBox("🤖 自动识别")
-            auto_layout = QVBoxLayout()
+            # --- 屏蔽自动识别模块 ---
+            # auto_group = QGroupBox("自动识别")
+            # auto_layout = QVBoxLayout()
+            # auto_layout.setSpacing(10)
 
-            btn_row1 = QHBoxLayout()
-            self.start_btn = QPushButton("▶ 开始监控")
-            self.start_btn.clicked.connect(self.toggle_auto_capture)
-            btn_row1.addWidget(self.start_btn)
+            # btn_row1 = QHBoxLayout()
+            # self.start_btn = QPushButton("▶ 开始监控")
+            # self.start_btn.clicked.connect(self.toggle_auto_capture)
+            # btn_row1.addWidget(self.start_btn)
+            # self.calibrate_btn = QPushButton("🎯 校准")
+            # self.calibrate_btn.clicked.connect(self.calibrate_regions)
+            # btn_row1.addWidget(self.calibrate_btn)
+            # auto_layout.addLayout(btn_row1)
 
-            self.calibrate_btn = QPushButton("🎯 校准")
-            self.calibrate_btn.clicked.connect(self.calibrate_regions)
-            btn_row1.addWidget(self.calibrate_btn)
-            auto_layout.addLayout(btn_row1)
+            # btn_row2 = QHBoxLayout()
+            # self.debug_btn = QPushButton("📸 调试截图")
+            # self.debug_btn.clicked.connect(self.take_debug_screenshot)
+            # btn_row2.addWidget(self.debug_btn)
+            # self.template_btn = QPushButton("📋 生成模板")
+            # self.template_btn.clicked.connect(self.open_template_generator)
+            # btn_row2.addWidget(self.template_btn)
+            # auto_layout.addLayout(btn_row2)
 
-            btn_row2 = QHBoxLayout()
-            self.debug_btn = QPushButton("📸 调试截图")
-            self.debug_btn.clicked.connect(self.take_debug_screenshot)
-            btn_row2.addWidget(self.debug_btn)
-
-            self.template_btn = QPushButton("📋 生成模板")
-            self.template_btn.clicked.connect(self.open_template_generator)
-            btn_row2.addWidget(self.template_btn)
-            auto_layout.addLayout(btn_row2)
-
-            self.debug_checkbox = QCheckBox("调试模式（保存识别过程图片）")
-            self.debug_checkbox.setChecked(False)
-            self.debug_checkbox.stateChanged.connect(self._toggle_debug_mode)
-            auto_layout.addWidget(self.debug_checkbox)
+            # self.debug_checkbox = QCheckBox("调试模式（保存识别过程图片）")
+            # self.debug_checkbox.setChecked(False)
+            # self.debug_checkbox.stateChanged.connect(self._toggle_debug_mode)
+            # auto_layout.addWidget(self.debug_checkbox)
 
             self.status_label = QLabel("状态: 就绪")
-            self.status_label.setStyleSheet("color: #888; font-size: 11px;")
+            self.status_label.setStyleSheet(
+                "color: #8f98b0; font-size: 12px; padding: 4px 2px 0 4px;"
+            )
             self.status_label.setWordWrap(True)
-            self.status_label.setMaximumHeight(48)
-            auto_layout.addWidget(self.status_label)
+            self.status_label.setMaximumHeight(44)
+            # auto_layout.addWidget(self.status_label)
 
-            auto_group.setLayout(auto_layout)
-            main_layout.addWidget(auto_group)
+            # auto_group.setLayout(auto_layout)
+            # main_layout.addWidget(auto_group)
+            
+            # 将状态标签直接添加到主布局中
+            main_layout.addWidget(self.status_label)
 
             main_layout.addStretch()
             self.setLayout(main_layout)
@@ -663,6 +786,12 @@ if HAS_PYQT:
             num_opp = self._get_num_opponents()
             my_cards = self._manual_my_cards
             community_cards = self._manual_comm_cards
+            
+            table_size = self._table_size
+            position = self._get_position_name()
+            remaining_opponents = self._remaining_opponents
+            pot_size, call_amount, effective_stack_bb = self._get_bet_context()
+            opponent_action = self.opponent_action_combo.currentText()
 
             if len(my_cards) != 2:
                 self.status_label.setText("⚠️ 请先选择 2 张手牌")
@@ -673,7 +802,14 @@ if HAS_PYQT:
 
             try:
                 result = self.calculator.calculate_odds(
-                    my_cards, community_cards, num_opp
+                    my_cards, community_cards, num_opp,
+                    table_size=table_size, 
+                    position=position, 
+                    remaining_opponents=remaining_opponents,
+                    pot_size=pot_size,
+                    call_amount=call_amount,
+                    effective_stack_bb=effective_stack_bb,
+                    opponent_action=opponent_action,
                 )
                 self.update_display(my_cards, community_cards, result)
                 self.status_label.setText(
@@ -681,6 +817,46 @@ if HAS_PYQT:
                 )
             except Exception as e:
                 self.status_label.setText(f"❌ 错误: {str(e)}")
+
+        def reset_all_inputs(self):
+            """重置所有输入选项到默认状态"""
+            self._manual_my_cards = []
+            self._manual_comm_cards = []
+            self.hand_btn.setText("点击选择手牌")
+            self.community_btn.setText("点击选择公共牌")
+            
+            self.pot_spin.setValue(0.0)
+            self.call_spin.setValue(0.0)
+            self.effective_stack_spin.setValue(100.0)
+            
+            self.table_size_combo.setCurrentIndex(1) # 默认9人桌
+            self._table_size = 9
+            self._refresh_position_options()
+            self.position_combo.setCurrentIndex(0) # 默认UTG
+            
+            self.remaining_opponents_spin.setValue(8)
+            self.opponent_action_combo.setCurrentIndex(1) # 默认Open Raise
+            
+            self.cards_label.setText("手牌: -- | 公共牌: --")
+            self.hand_type_label.setText("牌型: --")
+            self.texture_label.setText("牌面结构: --")
+            self.win_rate_label.setText("胜率: --%")
+            self.win_rate_label.setStyleSheet("color: #7d8aff; font-size: 34px; font-weight: 800;")
+            self.tie_label.setText("⚖️ 平局: --%")
+            self.lose_label.setText("❌ 败率: --%")
+            self.outs_label.setText("补牌(Outs): -- | 中牌率: --%")
+            self.pot_odds_label.setText("底池赔率: -- | 需求胜率: --")
+            self.ev_spr_label.setText("EV: -- | MDF: -- | SPR: -- | 弃牌率: --")
+            
+            self.suggestion_label.setText("建议: --")
+            self.suggestion_label.setStyleSheet(
+                """
+                font-size: 15px; font-weight: 700; padding: 10px 12px;
+                background-color: #202532; border: 1px solid #303748;
+                border-radius: 10px; color: #f3f6ff;
+            """
+            )
+            self.status_label.setText("状态: 已重置")
 
         # ===== 结果显示 =====
 
@@ -700,22 +876,35 @@ if HAS_PYQT:
             )
 
             self.cards_label.setText(
-                f"手牌: {hand_str}  |  公共牌: {comm_str}  |  {self._table_size}人桌 | {self._get_position_name()} | 在局{self._active_players}人"
+                f"手牌: {hand_str}  |  公共牌: {comm_str}  |  {self._table_size}人桌 | {self._get_position_name()} | 剩余{self._remaining_opponents}人"
             )
             self.hand_type_label.setText(f"牌型: {result['hand_name']}")
+            
+            texture = result.get("texture")
+            if texture and len(community_cards) >= 3:
+                wetness = texture.get('wetness', 0)
+                desc = "干燥" if wetness < 0.3 else "中等" if wetness < 0.6 else "湿润"
+                traits = []
+                if texture.get("monotone"): traits.append("同花面")
+                if texture.get("paired"): traits.append("公对面")
+                if traits:
+                    desc += f" ({', '.join(traits)})"
+                self.texture_label.setText(f"牌面结构: {desc} (指数: {wetness*100:.0f})")
+            else:
+                self.texture_label.setText("牌面结构: --")
 
             win_pct = result["win_rate"] * 100
             self.win_rate_label.setText(f"✅ 胜率: {win_pct:.1f}%")
 
             if win_pct >= 60:
-                color = "#4ecca3"
+                color = "#7f8dff"
             elif win_pct >= 40:
-                color = "#f0a500"
+                color = "#f6c56f"
             else:
-                color = "#e74c3c"
+                color = "#ff7c8f"
 
             self.win_rate_label.setStyleSheet(
-                f"color: {color}; font-size: 28px; font-weight: bold;"
+                f"color: {color}; font-size: 34px; font-weight: 800;"
             )
 
             self.tie_label.setText(f"⚖️ 平局: {result['tie_rate']*100:.1f}%")
@@ -725,19 +914,47 @@ if HAS_PYQT:
             outs_prob = result["outs_probability"] * 100
             self.outs_label.setText(f"补牌(Outs): {outs} | 中牌率: {outs_prob:.1f}%")
 
+            pot_info = result.get("pot_odds")
+            if pot_info:
+                self.pot_odds_label.setText(
+                    f"底池赔率: {pot_info['pot_odds_str']} | 需求胜率: {pot_info['required_equity_pct']}"
+                )
+            else:
+                self.pot_odds_label.setText("底池赔率: -- | 需求胜率: --")
+
+            call_ev_bb = result.get("call_ev_bb")
+            mdf_text = pot_info["mdf_pct"] if pot_info and "mdf_pct" in pot_info else "--"
+            spr_text = f"{result['spr']:.2f}" if "spr" in result else "--"
+            ev_text = f"{call_ev_bb:+.2f}bb" if call_ev_bb is not None else "--"
+            fold_equity = result.get("fold_equity")
+            fe_text = f"{fold_equity*100:.1f}%" if fold_equity is not None else "--"
+            
+            # 优先显示下注(诈唬)EV或跟注EV
+            bluff_ev_bb = result.get("bluff_ev_bb")
+            if bluff_ev_bb is not None and call_amount == 0:
+                ev_text = f"Bet(诈唬)EV: {bluff_ev_bb:+.2f}bb"
+            else:
+                ev_text = f"Call EV: {ev_text}"
+                
+            self.ev_spr_label.setText(f"{ev_text} | MDF: {mdf_text} | SPR: {spr_text} | 弃牌率(FE): {fe_text}")
+
             self.suggestion_label.setText(result["suggestion"])
 
-            if "RAISE" in result["suggestion"] and "🔥" in result["suggestion"]:
-                bg = "#1a4a2e"
-            elif "CALL" in result["suggestion"]:
-                bg = "#3a3a1e"
+            if any(word in result["suggestion"] for word in ("RAISE", "BET", "VALUE")) and "🔥" in result["suggestion"]:
+                bg = "#22283b"
+                border = "#7d8aff"
+            elif any(word in result["suggestion"] for word in ("CALL", "CHECK", "控池")):
+                bg = "#27262d"
+                border = "#c7a763"
             else:
-                bg = "#4a1a1e"
+                bg = "#2d2329"
+                border = "#d87384"
 
             self.suggestion_label.setStyleSheet(
                 f"""
-                font-size: 15px; font-weight: bold; padding: 8px;
-                background-color: {bg}; border-radius: 6px;
+                font-size: 15px; font-weight: 700; padding: 10px 12px;
+                background-color: {bg}; border: 1px solid {border};
+                border-radius: 10px; color: #f4f6ff;
             """
             )
 
@@ -796,12 +1013,19 @@ if HAS_PYQT:
                     self._last_recognized = current_key
 
                     num_opp = self._get_num_opponents()
+                    
+                    table_size = self._table_size
+                    position = self._get_position_name()
+                    remaining_opponents = self._remaining_opponents
+                    pot_size, call_amount, effective_stack_bb = self._get_bet_context()
+                    opponent_action = self.opponent_action_combo.currentText()
 
                     if self._calc_worker and self._calc_worker.isRunning():
                         return
 
                     self._calc_worker = CalcWorker(
-                        self.calculator, my_cards, community_cards, num_opp
+                        self.calculator, my_cards, community_cards, num_opp,
+                        table_size, position, remaining_opponents, pot_size, call_amount, effective_stack_bb, opponent_action
                     )
                     self._calc_worker.finished.connect(self._on_calc_finished)
                     self._calc_worker.error.connect(self._on_calc_error)
@@ -830,22 +1054,22 @@ if HAS_PYQT:
         def _on_table_size_changed(self, text):
             self._table_size = 6 if text.startswith("6") else 9
             self._refresh_position_options()
-            self._sync_active_players_limit()
+            self._sync_remaining_opponents_limit()
             self.status_label.setText(
-                f"ℹ️ 已切换为{self._table_size}人桌（对手数: {self._get_num_opponents()}）"
+                f"ℹ️ 已切换为{self._table_size}人桌（剩余人数=除自己未弃牌人数）"
             )
 
         def _on_position_changed(self, index):
             if index >= 0:
                 self._position_index = index
 
-        def _on_active_players_changed(self, value):
-            self._active_players = int(value)
+        def _on_remaining_opponents_changed(self, value):
+            self._remaining_opponents = int(value)
 
-        def _sync_active_players_limit(self):
-            self._active_players = min(max(self._active_players, 2), self._table_size)
-            self.active_players_spin.setRange(2, self._table_size)
-            self.active_players_spin.setValue(self._active_players)
+        def _sync_remaining_opponents_limit(self):
+            self._remaining_opponents = min(max(self._remaining_opponents, 1), self._table_size - 1)
+            self.remaining_opponents_spin.setRange(1, self._table_size - 1)
+            self.remaining_opponents_spin.setValue(self._remaining_opponents)
 
         def _refresh_position_options(self):
             current_names = self._position_names()
@@ -866,7 +1090,15 @@ if HAS_PYQT:
             return names[self._position_index]
 
         def _get_num_opponents(self):
-            return max(1, self._active_players - 1)
+            return max(1, self._remaining_opponents)
+
+        def _get_bet_context(self):
+            pot_size = float(self.pot_spin.value())
+            call_amount = float(self.call_spin.value())
+            effective_stack_bb = float(self.effective_stack_spin.value())
+            if pot_size > 0 or call_amount > 0:
+                return pot_size, call_amount, effective_stack_bb if effective_stack_bb > 0 else None
+            return None, None, None
 
         # ===== 调试功能 =====
 
@@ -1032,7 +1264,10 @@ if HAS_PYQT:
             self.config["gui"]["position"] = [pos.x(), pos.y()]
             self.config["gui"]["table_size"] = self._table_size
             self.config["gui"]["position_index"] = self._position_index
-            self.config["gui"]["active_players"] = self._active_players
+            self.config["gui"]["remaining_opponents"] = self._remaining_opponents
+            self.config["gui"]["pot_size_bb"] = float(self.pot_spin.value())
+            self.config["gui"]["call_amount_bb"] = float(self.call_spin.value())
+            self.config["gui"]["effective_stack_bb"] = float(self.effective_stack_spin.value())
             try:
                 self.config.save()
             except Exception:

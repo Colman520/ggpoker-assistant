@@ -39,13 +39,16 @@
     "opacity": 0.88,
     "always_on_top": true,
     "position": [
-      726,
-      232
+      969,
+      379
     ],
     "width": 1200,
     "height": 700,
-    "table_size": 6,
+    "table_size": 9,
     "position_index": 0,
-    "active_players": 6
+    "remaining_opponents": 8,
+    "pot_size_bb": 0.0,
+    "call_amount_bb": 0.0,
+    "effective_stack_bb": 100.0
   }
 }
