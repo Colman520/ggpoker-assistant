@@ -62,16 +62,16 @@ class Config:
                 with open(self.config_path, "r", encoding="utf-8") as f:
                     saved = json.load(f)
                     self._deep_update(self.data, saved)
-                print(f"✅ 已加载配置: {self.config_path}")
+                print(f"[OK] 已加载配置: {self.config_path}")
             except Exception as e:
-                print(f"⚠️ 配置加载失败，使用默认配置: {e}")
+                print(f"[WARN] 配置加载失败，使用默认配置: {e}")
         else:
-            print("ℹ️ 使用默认配置（首次运行）")
+            print("[INFO] 使用默认配置（首次运行）")
 
     def save(self):
         with open(self.config_path, "w", encoding="utf-8") as f:
             json.dump(self.data, f, indent=2, ensure_ascii=False)
-        print(f"✅ 配置已保存: {self.config_path}")
+        print(f"[OK] 配置已保存: {self.config_path}")
 
     def _deep_update(self, base, update):
         for key, value in update.items():
