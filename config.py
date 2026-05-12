@@ -85,3 +85,6 @@ class Config:
 
     def __setitem__(self, key, value):
         self.data[key] = value
+
+    def __contains__(self, key):
+        return key in self.data
