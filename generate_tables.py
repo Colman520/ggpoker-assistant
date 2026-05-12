@@ -95,16 +95,19 @@ class TableGenerator:
 
     def evaluate_flush_hand(self, cards):
         """评估同花手牌强度"""
-        # 这里只是示例，实际需要实现完整的评估逻辑
         ranks = [self.rank_to_index[c[0]] for c in cards]
         ranks.sort(reverse=True)
 
         # 检查是否为同花顺
         if self.is_straight(ranks):
-            if ranks[0] == 12:  # A高同花顺
-                return (9, [14])  # 皇家同花顺
+            # 皇家同花顺 (A-K-Q-J-T)
+            if ranks == [12, 11, 10, 9, 8]:
+                return (9, [14])
+            # 轮子同花顺 (A-5-4-3-2)
+            elif ranks == [12, 3, 2, 1, 0]:
+                return (8, [5])
             else:
-                return (8, [ranks[0] + 2])  # 同花顺
+                return (8, [ranks[0] + 2])
 
         # 普通同花
         return (5, [r + 2 for r in ranks])
