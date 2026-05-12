@@ -5,9 +5,29 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from config import Config
-from screen_capture import ScreenCapture
-from card_recognition import CardRecognizer, ManualCardInput
-from odds_calculator import OddsCalculator, HandEvaluator
+
+def create_odds_calculator(config):
+    """根据配置创建胜率计算器"""
+    algorithm = config["algorithm"]["odds_calculator"] if "algorithm" in config.data else "hybrid"
+
+    if algorithm == "hybrid":
+        from odds_calculator_hybrid import OddsCalculatorHybrid
+        return OddsCalculatorHybrid(config)
+    else:
+        from odds_calculator import OddsCalculator
+        return OddsCalculator(config)
+
+def create_hand_evaluator(config):
+    """根据配置创建手牌评估器"""
+    algorithm = config["algorithm"]["hand_evaluator"] if "algorithm" in config.data else "two_plus_two"
+
+    if algorithm == "two_plus_two":
+        from hand_evaluator_two_plus_two import HandEvaluatorTwoPlusTwo
+        table_path = config["algorithm"]["table_path"] if "algorithm" in config.data else "tables/"
+        return HandEvaluatorTwoPlusTwo(table_path)
+    else:
+        from odds_calculator import HandEvaluator
+        return HandEvaluator()
 
 
 def main_gui():
@@ -36,8 +56,9 @@ def main_gui():
 
 def main_cli():
     """命令行模式"""
+    from card_recognition import ManualCardInput
     config = Config()
-    calculator = OddsCalculator(config)
+    calculator = create_odds_calculator(config)
 
     print("=" * 50)
     print("🃏 GGPoker 胜率计算器 (命令行模式)")

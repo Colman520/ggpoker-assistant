@@ -31,7 +31,7 @@ except ImportError:
 from config import Config
 from screen_capture import ScreenCapture
 from card_recognition import CardRecognizer, ManualCardInput
-from odds_calculator import OddsCalculator
+from main import create_odds_calculator
 
 
 if HAS_PYQT:
@@ -293,7 +293,7 @@ if HAS_PYQT:
             self.config = config
             self.capture = ScreenCapture(config)
             self.recognizer = CardRecognizer(config)
-            self.calculator = OddsCalculator(config)
+            self.calculator = create_odds_calculator(config)
 
             self.is_running = False
             self.timer = QTimer()

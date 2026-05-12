@@ -7,7 +7,7 @@ try:
     HAS_MSS = True
 except ImportError:
     HAS_MSS = False
-    print("⚠️ mss 未安装: pip install mss")
+    print("[WARN] mss 未安装: pip install mss")
 
 try:
     import win32gui
@@ -15,7 +15,7 @@ try:
     HAS_WIN32 = True
 except ImportError:
     HAS_WIN32 = False
-    print("⚠️ pywin32 未安装: pip install pywin32")
+    print("[WARN] pywin32 未安装: pip install pywin32")
 
 try:
     import cv2
@@ -40,7 +40,7 @@ class ScreenCapture:
     def find_ggpoker_window(self) -> bool:
         """查找GGPoker窗口位置"""
         if not HAS_WIN32:
-            print("⚠️ pywin32 未安装，无法自动查找窗口")
+            print("[WARN] pywin32 未安装，无法自动查找窗口")
             return False
 
         keyword = self.config["window_title_keyword"]
@@ -64,16 +64,16 @@ class ScreenCapture:
             candidates.sort(key=lambda x: x[3], reverse=True)
             hwnd, title, rect, area = candidates[0]
             self.window_rect = rect
-            print(f"✅ GGPoker窗口: {rect[2]-rect[0]}x{rect[3]-rect[1]} @ ({rect[0]},{rect[1]})")
+            print(f"[OK] GGPoker窗口: {rect[2]-rect[0]}x{rect[3]-rect[1]} @ ({rect[0]},{rect[1]})")
             return True
         else:
-            print("❌ 未找到GGPoker窗口")
+            print("[FAIL] 未找到GGPoker窗口")
             return False
 
     def set_window_rect(self, left, top, right, bottom):
         """手动设置窗口区域"""
         self.window_rect = (left, top, right, bottom)
-        print(f"✅ 手动设置窗口: {right-left}x{bottom-top}")
+        print(f"[OK] 手动设置窗口: {right-left}x{bottom-top}")
 
     def capture_region(self, region_name: str) -> np.ndarray:
         """截取指定区域"""
@@ -161,8 +161,8 @@ class ScreenCapture:
             name = f"debug_{ts}_{label}.png" if label else f"debug_{ts}.png"
             path = os.path.join(self.debug_dir, name)
             cv2.imwrite(path, img)
-            print(f"📸 调试截图: {path}")
+            print(f"[INFO] 调试截图: {path}")
             return path
         except Exception as e:
-            print(f"❌ 截图失败: {e}")
+            print(f"[FAIL] 截图失败: {e}")
             return None
