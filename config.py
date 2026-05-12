@@ -35,6 +35,13 @@ class Config:
             "call_amount_bb": 0.0,
             "effective_stack_bb": 100.0,
         },
+        "algorithm": {
+            "hand_evaluator": "two_plus_two",  # "cactus_kev" 或 "two_plus_two"
+            "odds_calculator": "hybrid",  # "monte_carlo", "exact", 或 "hybrid"
+            "exact_calculation_threshold": 1000000,  # 精确计算的组合数阈值
+            "monte_carlo_simulations": 10000,  # 蒙特卡洛模拟次数
+            "table_path": "tables/",  # 查表文件路径
+        },
     }
 
     def __init__(self, config_path="config.json"):
