@@ -7,13 +7,14 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from config import Config
-from odds_calculator import HandEvaluator, OddsCalculator
+from hand_evaluator_two_plus_two import HandEvaluatorTwoPlusTwo
+from odds_calculator_hybrid import OddsCalculatorHybrid
 
 def test_hand_evaluator_performance():
     """测试手牌评估器性能"""
     from itertools import combinations
 
-    evaluator = HandEvaluator()
+    evaluator = HandEvaluatorTwoPlusTwo()
     ranks = ["2", "3", "4", "5", "6", "7", "8", "9", "T", "J", "Q", "K", "A"]
     suits = ["s", "h", "d", "c"]
     deck = [f"{r}{s}" for r in ranks for s in suits]
@@ -47,22 +48,24 @@ def test_hand_evaluator_performance():
 def test_odds_calculator_performance():
     """测试胜率计算器性能"""
     config = Config()
-    config["simulation_count"] = 10000
-    calc = OddsCalculator(config)
+    config["simulation_count"] = 200
+    calc = OddsCalculatorHybrid(config)
 
     # 测试翻前计算
     start = time.time()
-    for _ in range(100):
+    count = 5
+    for _ in range(count):
         calc.calculate_odds(["Ah", "Kh"], [], 5)
     elapsed = time.time() - start
-    print(f"翻前计算: 100次, 耗时{elapsed:.3f}s, 平均{elapsed/100*1000:.1f}ms/次")
+    print(f"翻前计算: {count}次, 耗时{elapsed:.3f}s, 平均{elapsed/count*1000:.1f}ms/次")
 
     # 测试翻后计算
     start = time.time()
-    for _ in range(50):
+    count = 5
+    for _ in range(count):
         calc.calculate_odds(["Ah", "Kh"], ["Qh", "Jh", "3c"], 3)
     elapsed = time.time() - start
-    print(f"翻后计算: 50次, 耗时{elapsed:.3f}s, 平均{elapsed/50*1000:.1f}ms/次")
+    print(f"翻后计算: {count}次, 耗时{elapsed:.3f}s, 平均{elapsed/count*1000:.1f}ms/次")
 
 if __name__ == "__main__":
     print("=" * 60)

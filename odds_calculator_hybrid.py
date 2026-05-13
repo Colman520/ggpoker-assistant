@@ -29,16 +29,29 @@ class OddsCalculatorHybrid:
         # 配置参数
         algorithm = config["algorithm"] if "algorithm" in config.data else {}
         self.exact_threshold = algorithm.get("exact_calculation_threshold", 1000000)
-        self.default_simulations = algorithm.get("monte_carlo_simulations", 10000)
+        self.default_simulations = self._configured_simulation_count()
+
+    def _configured_simulation_count(self) -> int:
+        """读取兼容旧配置的模拟次数。"""
+        if "simulation_count" in self.config.data:
+            return int(self.config["simulation_count"])
+
+        algorithm = self.config["algorithm"] if "algorithm" in self.config.data else {}
+        return int(algorithm.get("monte_carlo_simulations", 10000))
 
     @staticmethod
     def _combo_key(cards: List[str]) -> Tuple[str, str]:
         return tuple(sorted(cards))
 
-    def _hole_card_score(self, cards: List[str]) -> float:
-        """给起手牌一个启发式强度分数"""
+    def _hand_class_key(self, cards: List[str]) -> Tuple[int, int, bool]:
         rank1 = self.evaluator.RANK_TO_INDEX[cards[0][0]]
         rank2 = self.evaluator.RANK_TO_INDEX[cards[1][0]]
+        return max(rank1, rank2), min(rank1, rank2), cards[0][1] == cards[1][1]
+
+    def _hole_card_score(self, cards: List[str]) -> float:
+        """给起手牌一个启发式强度分数"""
+        rank1 = self.evaluator.RANK_TO_INDEX[cards[0][0]] + 2
+        rank2 = self.evaluator.RANK_TO_INDEX[cards[1][0]] + 2
         high = max(rank1, rank2)
         low = min(rank1, rank2)
         suited = cards[0][1] == cards[1][1]
@@ -89,8 +102,16 @@ class OddsCalculatorHybrid:
         ranked.sort(key=lambda item: item[1], reverse=True)
         total = max(len(ranked) - 1, 1)
         percentiles = {}
-        for index, (key, _) in enumerate(ranked):
-            percentiles[key] = index / total
+        index = 0
+        while index < len(ranked):
+            score = ranked[index][1]
+            group_start = index
+            while index < len(ranked) and ranked[index][1] == score:
+                index += 1
+
+            percentile = group_start / total
+            for key, _ in ranked[group_start:index]:
+                percentiles[key] = percentile
         return percentiles
 
     def _preflop_percentile(self, cards: List[str]) -> float:
@@ -167,15 +188,20 @@ class OddsCalculatorHybrid:
 
     def _straight_completion_ranks(self, cards: List[str]) -> Set[int]:
         ranks = self._rank_set(cards)
+        present_ranks = {HandEvaluatorTwoPlusTwo.RANK_TO_INDEX[c[0]] for c in cards}
+        straight_sequences = [set(range(start, start + 5)) for start in range(9)]
+        straight_sequences.append({-1, 0, 1, 2, 3})  # A-2-3-4-5
         completions = set()
         for add_rank in range(13):
+            if add_rank in present_ranks:
+                continue
+
             test_ranks = set(ranks)
             test_ranks.add(add_rank)
             if add_rank == 12:
                 test_ranks.add(-1)
 
-            for start in range(9):
-                seq = set(range(start, start + 5))
+            for seq in straight_sequences:
                 if seq.issubset(test_ranks):
                     completions.add(add_rank)
                     break
@@ -187,16 +213,17 @@ class OddsCalculatorHybrid:
 
     def _draw_profile(self, my_cards: List[str], community_cards: List[str]) -> Dict[str, object]:
         cards = my_cards + community_cards
-        straight_completion = self._straight_completion_ranks(cards)
+        straight_completion = set()
         straight_draw_type = "none"
         if len(community_cards) < 5:
+            straight_completion = self._straight_completion_ranks(cards)
             if len(straight_completion) >= 2:
                 straight_draw_type = "open_ended"
             elif len(straight_completion) == 1:
                 straight_draw_type = "gutshot"
 
         return {
-            "flush_draw": self._has_flush_draw(cards),
+            "flush_draw": len(community_cards) < 5 and self._has_flush_draw(cards),
             "straight_draw": straight_draw_type,
             "straight_draw_cards": len(straight_completion),
         }
@@ -447,19 +474,41 @@ class OddsCalculatorHybrid:
 
     def _choose_method(self, remaining_cards: int, num_opponents: int) -> str:
         """动态选择计算方法"""
-        # 使用math.comb估算组合数
+        if num_opponents > 1:
+            return "monte_carlo"
+
         deck_size = 52 - 2 - (5 - remaining_cards)
         if remaining_cards > 0:
             community_combos = math.comb(deck_size, remaining_cards)
             remaining_after = deck_size - remaining_cards
-            opponent_combos = math.comb(remaining_after, 2 * num_opponents)
+            opponent_combos = self._opponent_hand_assignment_count(remaining_after, num_opponents)
             total_combos = community_combos * opponent_combos
         else:
-            total_combos = math.comb(deck_size, 2 * num_opponents)
+            total_combos = self._opponent_hand_assignment_count(deck_size, num_opponents)
 
         if total_combos <= self.exact_threshold:
             return "exact"
         return "monte_carlo"
+
+    @staticmethod
+    def _opponent_hand_assignment_count(deck_size: int, num_opponents: int) -> int:
+        """对固定座位的对手发牌组合数。"""
+        total = 1
+        for index in range(num_opponents):
+            total *= math.comb(deck_size - index * 2, 2)
+        return total
+
+    def _iter_opponent_hands(self, available: List[str], num_opponents: int):
+        """枚举固定座位对手的所有不重叠两张手牌。"""
+        if num_opponents == 0:
+            yield []
+            return
+
+        for hand in combinations(available, 2):
+            hand_set = set(hand)
+            remaining = [card for card in available if card not in hand_set]
+            for rest in self._iter_opponent_hands(remaining, num_opponents - 1):
+                yield [list(hand)] + rest
 
     def calculate_odds(
         self,
@@ -483,7 +532,8 @@ class OddsCalculatorHybrid:
         if num_opponents is None:
             num_opponents = self.config["default_opponents"]
         if num_simulations is None:
-            num_simulations = self.default_simulations
+            num_simulations = self._configured_simulation_count()
+        num_simulations = int(num_simulations)
         if active_players is not None:
             remaining_opponents = max(1, int(active_players) - 1)
 
@@ -493,13 +543,22 @@ class OddsCalculatorHybrid:
         all_known = my_cards + community_cards
         if len(my_cards) != 2:
             raise ValueError("手牌必须是2张")
+        if len(community_cards) not in (0, 3, 4, 5):
+            raise ValueError("公共牌数量必须是0、3、4或5张")
         if len(community_cards) > 5:
             raise ValueError("公共牌最多5张")
         if len(set(all_known)) != len(all_known):
             raise ValueError("牌面有重复！")
+        if method not in ("auto", "exact", "monte_carlo"):
+            raise ValueError("计算方法必须是auto、exact或monte_carlo")
 
         remaining_deck = [c for c in self.FULL_DECK if c not in all_known]
         cards_to_deal = 5 - len(community_cards)
+        cards_needed = cards_to_deal + 2 * num_opponents
+        if cards_needed > len(remaining_deck):
+            raise ValueError("对手数量过多，剩余牌不足")
+        if num_simulations <= 0:
+            raise ValueError("模拟次数必须大于0")
 
         # 动态选择计算方法
         if method == "auto":
@@ -599,15 +658,9 @@ class OddsCalculatorHybrid:
         equity_sum = 0.0
 
         if cards_to_deal == 0:
-            for opponent_combo in combinations(remaining_deck, 2 * num_opponents):
-                opponent_hands = []
-                for i in range(num_opponents):
-                    hand = list(opponent_combo[i*2:(i+1)*2])
-                    opponent_hands.append(hand)
-
-                my_full = my_cards + community_cards
-                my_score = self.evaluator.evaluate_hand(my_full)
-
+            my_full = my_cards + community_cards
+            my_score = self.evaluator.evaluate_hand(my_full)
+            for opponent_hands in self._iter_opponent_hands(remaining_deck, num_opponents):
                 all_scores = [my_score]
                 for opp_hand in opponent_hands:
                     opp_full = opp_hand + community_cards
@@ -632,16 +685,10 @@ class OddsCalculatorHybrid:
             for community_combo in combinations(remaining_deck, cards_to_deal):
                 full_community = community_cards + list(community_combo)
                 remaining_after_community = [c for c in remaining_deck if c not in community_combo]
+                my_full = my_cards + full_community
+                my_score = self.evaluator.evaluate_hand(my_full)
 
-                for opponent_combo in combinations(remaining_after_community, 2 * num_opponents):
-                    opponent_hands = []
-                    for i in range(num_opponents):
-                        hand = list(opponent_combo[i*2:(i+1)*2])
-                        opponent_hands.append(hand)
-
-                    my_full = my_cards + full_community
-                    my_score = self.evaluator.evaluate_hand(my_full)
-
+                for opponent_hands in self._iter_opponent_hands(remaining_after_community, num_opponents):
                     all_scores = [my_score]
                     for opp_hand in opponent_hands:
                         opp_full = opp_hand + full_community
@@ -705,23 +752,17 @@ class OddsCalculatorHybrid:
         losses = 0
         equity_sum = 0.0
 
-        for _ in range(num_simulations):
-            available = remaining_deck[:]
+        cards_needed = cards_to_deal + 2 * num_opponents
 
-            if cards_to_deal > 0:
-                sim_community = community_cards + random.sample(available, cards_to_deal)
-                for c in sim_community:
-                    if c in available:
-                        available.remove(c)
-            else:
-                sim_community = community_cards[:]
+        for _ in range(num_simulations):
+            deal = random.sample(remaining_deck, cards_needed)
+            sim_community = community_cards + deal[:cards_to_deal]
 
             opponent_hands = []
-            for _ in range(num_opponents):
-                hand = random.sample(available, 2)
-                opponent_hands.append(hand)
-                for card in hand:
-                    available.remove(card)
+            offset = cards_to_deal
+            for opponent_index in range(num_opponents):
+                start = offset + opponent_index * 2
+                opponent_hands.append(deal[start:start + 2])
 
             my_full = my_cards + sim_community
             my_score = self.evaluator.evaluate_hand(my_full)

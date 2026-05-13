@@ -797,26 +797,19 @@ if HAS_PYQT:
                 self.status_label.setText("⚠️ 请先选择 2 张手牌")
                 return
 
-            self.status_label.setText("🔄 计算中...")
-            QApplication.processEvents()
+            if self._calc_worker and self._calc_worker.isRunning():
+                self.status_label.setText("🔄 正在计算中...")
+                return
 
-            try:
-                result = self.calculator.calculate_odds(
-                    my_cards, community_cards, num_opp,
-                    table_size=table_size, 
-                    position=position, 
-                    remaining_opponents=remaining_opponents,
-                    pot_size=pot_size,
-                    call_amount=call_amount,
-                    effective_stack_bb=effective_stack_bb,
-                    opponent_action=opponent_action,
-                )
-                self.update_display(my_cards, community_cards, result)
-                self.status_label.setText(
-                    f"✅ 计算完成 ({result['simulations']}次模拟)"
-                )
-            except Exception as e:
-                self.status_label.setText(f"❌ 错误: {str(e)}")
+            self.status_label.setText("🔄 计算中...")
+            self._calc_worker = CalcWorker(
+                self.calculator, my_cards, community_cards, num_opp,
+                table_size, position, remaining_opponents,
+                pot_size, call_amount, effective_stack_bb, opponent_action
+            )
+            self._calc_worker.finished.connect(self._on_calc_finished)
+            self._calc_worker.error.connect(self._on_calc_error)
+            self._calc_worker.start()
 
         def reset_all_inputs(self):
             """重置所有输入选项到默认状态"""
@@ -1045,7 +1038,7 @@ if HAS_PYQT:
         def _on_calc_finished(self, my_cards, community_cards, result):
             self.update_display(my_cards, community_cards, result)
             self.status_label.setText(
-                f"🟢 识别: {my_cards} | {community_cards}"
+                f"✅ 计算完成 ({result['simulations']}次模拟)"
             )
 
         def _on_calc_error(self, error_msg):
